@@ -1,0 +1,13 @@
+PyMuPDF
+python-pptx
+paddleocr
+paddlepaddle
+camelot-py[cv]
+opencv-python-headless
+requests
+Pillow
+
+# Structuring module
+openai
+pydantic
+google-genai

@@ -1,0 +1,82 @@
+{
+  "source_file": "Teaching PlanCA 2026 spring.md",
+  "document_overview": {
+    "document_title": "Teaching Plan CA 2026 spring",
+    "subject": "Computer Architecture",
+    "overarching_summary": "This teaching plan covers the topics of computer architecture, processor design, and ARM processor architecture, with a focus on theory and lab work.",
+    "chapters": [
+      {
+        "chapter_name": "Introduction to Computer Architecture and Processor Design",
+        "slide_range": "1-6",
+        "key_topics": [
+          "Introduction of Computer Architecture",
+          "Processor Design, classification of processor",
+          "Parralell processor",
+          "Array Processor",
+          "pipelining",
+          "Architectural classifications based on multiplicity of data and instruction"
+        ]
+      },
+      {
+        "chapter_name": "ARM Processor Architecture",
+        "slide_range": "7-27",
+        "key_topics": [
+          "ARM conditional flags, Reset, Register set",
+          "ARM data flow and instruction set",
+          "ARM assembly language programming",
+          "ARM interrupt processing",
+          "ARM co-processor interface",
+          "Memory hierarchy in ARM",
+          "Memory protection in ARM",
+          "ARM programming tools",
+          "AMBA architecture",
+          "Peripherals (DMA, RTC, ADC, DAC, PWM)",
+          "I2C and SPI Protocol, UART and GPIO",
+          "Other ARM processor (ARM 9, 11, 13)"
+        ]
+      }
+    ],
+    "total_slides": 28
+  },
+  "global_summary": {
+    "document_title": "Teaching Plan CA 2026 spring",
+    "subject": "Computer Architecture",
+    "global_summary": "This comprehensive teaching plan covers the fundamentals of computer architecture and processor design, including the basics of computer architecture, processor design, and ARM processor architecture. The plan provides a solid foundation for students to understand the design and implementation of computer systems. The introduction sets the stage for the subsequent chapters, which delve into the intricacies of computer architecture and processor design.",
+    "chapter_summaries": [
+      {
+        "chapter_name": "Introduction to Computer Architecture and Processor Design",
+        "summary": "This chapter introduces the topics of computer architecture and processor design, covering the basics of computer architecture, processor design, and ARM processor architecture.",
+        "key_concepts": [
+          "computer architecture",
+          "processor design",
+          "ARM processor architecture"
+        ],
+        "has_numerical_examples": false
+      }
+    ],
+    "core_topics": [
+      "computer architecture",
+      "processor design",
+      "ARM processor architecture"
+    ],
+    "total_chapters": 1
+  },
+  "slides": [
+    {
+      "slide_number": 1,
+      "parent_topic": "Unknown",
+      "slide_type": "other",
+      "core_concepts": [],
+      "exam_signals": false,
+      "slide_summary": "[Classification failed] ## Page 1"
+    },
+    {
+      "slide_number": 2,
+      "parent_topic": "Unknown",
+      "slide_type": "other",
+      "core_concepts": [],
+      "exam_signals": false,
+      "slide_summary": "[Classification failed] ## Page 2"
+    }
+  ]
+}
