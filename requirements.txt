@@ -10,3 +10,8 @@ Pillow
 # Structuring module
 openai-agents
 pydantic
+
+# Indexing module
+chromadb
+sentence-transformers
+sqlalchemy
