@@ -1,11 +1,27 @@
 # Teaching PlanCA 2026 spring
 
-_Source: Teaching PlanCA 2026 spring.pdf_
+---
+
+## Document Overview
+
+**Subject:** Computer Science and Engineering (CSE)
+
+**Summary:** This teaching plan for Computer Architecture (CA) 2026 Spring provides a comprehensive overview of the subject, covering the basics of computer architecture, processor design, and classification. The plan delves into the fundamental concepts of pipelining, architectural classifications, and the ARM processor architecture. It also explores the different types of processors, including parallel processors and array processors. The plan aims to provide students with a solid understanding of computer architecture and its various aspects.
+
+**Core Topics:** processor design, processor classification, pipelining, architectural classifications, ARM processor architecture, parallel processors, array processors
+
+**Chapters:**
+  - **Introduction and Processor Design** (slides 1-6): Introduction to Computer Architecture, Processor Design, Classification of Processors, Parallel Processors, Array Processors, Pipelining
+  - **ARM Processor Architecture** (slides 13-27): ARM Conditional Flags, ARM Data Flow and Instruction Set, ARM Assembly Language Programming, ARM Interrupt Processing, ARM Co-Processor Interface, Memory Hierarchy in ARM, Memory Protection in ARM, ARM Programming Tools, AMBA Architecture, Peripherals (DMA, RTC, ADC, DAC, PWM), I2C and SPI Protocol, UART and GPIO, Other ARM Processors (ARM 9, 11, 13)
+  - **Project Work and Evaluation** (slides 7, 12, 16, 19, 28): Project Work, Assignment and Project Evaluation, Quiz Evaluation, End Sem Exam Evaluation
 
 
 ---
 
 ## Page 1
+
+> **Title:** Introduction and Processor Design | **Type:** table | **Concepts:** Teaching Plan, Course Name, Computer Architecture, Lecture Plan, Module Name, Topic Name, Introduction of Computer Architecture, Processor Design, Pipelining, Architectural classifications, Project work, CISC versus RISC, Instruction pipelining hazards, Super pipelining, ARM conditional flags, ARM assembly language programming, Memory hierarchy in ARM, AMBA architecture, Peripherals, I2C and SPI Protocol, UART and GPIO, Other ARM processor | **Exam Signal:** No
+> **Summary:** This slide provides the teaching plan for the Computer Architecture course, detailing course information and a comprehensive lecture schedule covering various topics from processor design to ARM architecture and project work.
 
 Teaching Plan
 
@@ -199,10 +215,12 @@ and GPIO | Theory |
 | 27 | Other ARM processor
 (ARM 9, 11, 13) | Theory |
 
-
 ---
 
 ## Page 2
+
+> **Title:** Project Work and Evaluation | **Type:** concept | **Concepts:** Project, Online mode teaching, Software Used, Tool used, Evaluation Plan, Assignment and project, Quiz, End sem Exam | **Exam Signal:** No
+> **Summary:** This slide finalizes the lecture plan with project work and specifies the details for online mode teaching, including software and tools. It also outlines the course evaluation plan, which includes assignments, projects, quizzes, and the end-semester exam.
 
 28
 Project

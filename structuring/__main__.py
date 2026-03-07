@@ -7,6 +7,7 @@ Usage:
 """
 
 import sys
+import asyncio
 import logging
 
 logging.basicConfig(
@@ -17,13 +18,16 @@ logging.basicConfig(
 
 from structuring import run_structuring
 
-if __name__ == "__main__":
+
+async def main():
     source = sys.argv[1] if len(sys.argv) > 1 else None
-    results = run_structuring(source)
+    results = await run_structuring(source)
 
-    if not results:
-        sys.exit(0)
+    if results:
+        print("\nStructured files:")
+        for r in results:
+            print(f"  {r}")
 
-    print("\nStructured outputs:")
-    for r in results:
-        print(f"  {r}")
+
+if __name__ == "__main__":
+    asyncio.run(main())

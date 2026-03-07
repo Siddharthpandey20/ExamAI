@@ -1,7 +1,9 @@
 """
 config.py — Configuration for the structuring module.
 
-Centralized settings for Ollama (file-level agent) and Gemini (slide-level agent).
+Centralized settings for:
+  - Ollama  (file-level agent)  via OpenAI Agents SDK + OpenAIProvider
+  - Gemini (slide-level agent) via OpenAI Agents SDK + OpenAIProvider
 """
 
 import os
@@ -9,37 +11,29 @@ import os
 # ── Paths ────────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KNOWLEDGE_DIR = os.path.join(BASE_DIR, "knowledge")
-STRUCTURED_DIR = os.path.join(BASE_DIR, "structured_output")
 TRACKER_FILE = os.path.join(BASE_DIR, "structuring", "structured.json")
 
 # ── Ollama (File-Level Agent) ────────────────────────────────────────────
-OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1"
 OLLAMA_MODEL = "llama3"
 
-# OpenAI-compatible endpoint for Ollama
-OLLAMA_OPENAI_BASE = f"{OLLAMA_BASE_URL}/v1"
-
-# Max characters for the "preview" sent to Ollama Step 1.
-# If the entire file is shorter than this, send the whole thing.
+# Max chars for preview sent to Ollama Step 1.
+# If entire file is shorter, send the whole thing.
 PREVIEW_CHAR_LIMIT = 6000
 
-# Max slides to include in a single Ollama chapter-summary call
-OLLAMA_CHAPTER_BATCH_SIZE = 20
-
-# ── AI (Slide-Level Agent) ───────────────────────────────────────────
-# Set your API key via environment variable: GROQ_API_KEY
+# ── Groq (Slide-Level Agent) ────────────────────────────────────────────
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_MODEL = "llama3-8b-8192"
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
-# OpenAI-compatible endpoint for GROQ
-GROQ_OPENAI_BASE = "https://api.groq.com/openai/v1"
+# ── Gemini(Slide-Level Agent) ────────────────────────────────────────────
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+GEMINI_MODEL = "gemini-2.5-flash"
 
-# Sliding window: how many slides per GROQ API call
-SLIDE_BATCH_SIZE = 12
+# Sliding window: slides per Gemini API call
+SLIDE_BATCH_SIZE = 25
 
-# Rate limiting: max GROQ API calls per minute
+# Rate limiting: max calls per minute
 GROQ_MAX_CALLS_PER_MINUTE = 20
-
-# ── General ──────────────────────────────────────────────────────────────
-# Timeout for LLM API calls (seconds)
-LLM_TIMEOUT = 80
+GEMINI_MAX_CALLS_PER_MINUTE = 10

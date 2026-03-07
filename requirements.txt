@@ -8,6 +8,5 @@ requests
 Pillow
 
 # Structuring module
-openai
+openai-agents
 pydantic
-google-genai

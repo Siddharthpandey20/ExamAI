@@ -2,3 +2,7 @@ env/
 .env
 uploads/
 try.ipynb
+structuring\structured.json
+__pycache__/
+try.py 
+test.py 
