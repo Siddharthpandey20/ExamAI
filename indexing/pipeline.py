@@ -171,11 +171,8 @@ def index_file(
             "source_file": filename,
             "page_number": s.page_number,
             "slide_type": s.slide_type,
-            "exam_signal": s.exam_signal,
             "concepts": ", ".join(s.concepts),
             "chapter": s.chapter,
-            "pyq_hit_count": 0,
-            "importance_score": 0.0,
         })
 
     chroma.upsert_slides(
