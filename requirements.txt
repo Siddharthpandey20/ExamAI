@@ -15,3 +15,6 @@ pydantic
 chromadb
 sentence-transformers
 sqlalchemy
+
+# PYQ module
+rank-bm25
