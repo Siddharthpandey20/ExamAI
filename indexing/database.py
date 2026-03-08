@@ -82,6 +82,26 @@ def get_db() -> Generator[Session, None, None]:
         session.close()
 
 
+def get_db_dep() -> Generator[Session, None, None]:
+    """
+    FastAPI dependency that yields a session.
+
+    Usage:
+        @router.get("/...")
+        def endpoint(db: Session = Depends(get_db_dep)):
+            ...
+    """
+    session = SessionFactory()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 # ── Bootstrap ────────────────────────────────────────────────────────────
 
 def init_db():

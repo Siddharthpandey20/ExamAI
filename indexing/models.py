@@ -32,6 +32,19 @@ class Base(DeclarativeBase):
     pass
 
 
+class Subject(Base):
+    __tablename__ = "subjects"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    name       = Column(String, nullable=False, unique=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    documents = relationship("Document", back_populates="subject_rel")
+
+    def __repr__(self):
+        return f"<Subject id={self.id} name='{self.name}'>"
+
+
 class Document(Base):
     __tablename__ = "documents"
 
@@ -41,14 +54,19 @@ class Document(Base):
     processed_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     status       = Column(String, nullable=False, default="pending")
 
+    # User-assigned subject (matches subjects.name)
+    subject      = Column(String, index=True)
+    subject_id   = Column(Integer, ForeignKey("subjects.id"), nullable=True, index=True)
+
     # Document-level metadata (from structuring pipeline)
-    subject      = Column(String)
+    ai_subject   = Column(String)           # AI-extracted subject (from Agent 1)
     summary      = Column(Text)
     core_topics  = Column(Text)          # comma-separated topic list
     chapters_json = Column(Text)         # JSON array: [{name, slide_range, topics}, ...]
     total_slides = Column(Integer, default=0)
 
     slides = relationship("Slide", back_populates="document", cascade="all, delete-orphan")
+    subject_rel = relationship("Subject", back_populates="documents")
 
     def __repr__(self):
         return f"<Document id={self.id} filename='{self.filename}' status='{self.status}'>"
@@ -69,6 +87,7 @@ class Slide(Base):
     summary          = Column(Text)
     concepts         = Column(Text)
     chapter          = Column(String)
+    subject          = Column(String, index=True)
     is_embedded      = Column(Boolean, default=False)
     pyq_hit_count    = Column(Integer, default=0)
     importance_score = Column(Float, default=0.0)
@@ -86,6 +105,7 @@ class PYQQuestion(Base):
     id            = Column(Integer, primary_key=True, autoincrement=True)
     question_text = Column(Text, nullable=False)
     source_file   = Column(String)
+    subject       = Column(String, index=True)
     embedding_id  = Column(String)
 
     matches = relationship("PYQMatch", back_populates="question", cascade="all, delete-orphan")

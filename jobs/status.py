@@ -48,6 +48,7 @@ def _serialize_job(job: Job) -> dict:
         "filepath": job.filepath,
         "job_type": job.job_type,
         "status": job.status,
+        "subject": job.subject,
         "current_phase": job.current_phase,
         "celery_chain_id": job.celery_chain_id,
         "created_at": job.created_at.isoformat() if job.created_at else None,

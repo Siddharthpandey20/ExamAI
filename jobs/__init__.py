@@ -63,7 +63,7 @@ def _ensure_db():
     init_db()
 
 
-def _create_job(filepath: str, job_type: str) -> int:
+def _create_job(filepath: str, job_type: str, subject: str = "") -> int:
     """Create a Job record with its phase records in SQLite. Returns job ID."""
     _ensure_db()
     filename = os.path.basename(filepath)
@@ -75,6 +75,7 @@ def _create_job(filepath: str, job_type: str) -> int:
             filepath=os.path.abspath(filepath),
             job_type=job_type,
             status=JobStatus.PENDING.value,
+            subject=subject,
         )
         session.add(job)
         session.flush()
@@ -101,7 +102,7 @@ def _store_chain_id(job_id: int, chain_id: str):
             job.celery_chain_id = chain_id
 
 
-def submit_study_materials(filepaths: list[str]) -> list[int]:
+def submit_study_materials(filepaths: list[str], subject: str = "") -> list[int]:
     """
     Submit study material files for background processing.
 
@@ -112,6 +113,8 @@ def submit_study_materials(filepaths: list[str]) -> list[int]:
     ----------
     filepaths : list[str]
         Paths to raw upload files (PDF, PPTX).
+    subject : str
+        User-assigned subject name.
 
     Returns
     -------
@@ -127,12 +130,12 @@ def submit_study_materials(filepaths: list[str]) -> list[int]:
             log.warning(f"[submit] File not found: {filepath}")
             continue
 
-        job_id = _create_job(filepath, JobType.STUDY_MATERIAL.value)
+        job_id = _create_job(filepath, JobType.STUDY_MATERIAL.value, subject=subject)
 
         pipeline = celery_chain(
-            ingest_task.s(filepath, job_id),
+            ingest_task.s(filepath, job_id, subject),
             structure_task.s(job_id),
-            index_task.s(job_id),
+            index_task.s(job_id, subject),
         )
         result = pipeline.apply_async()
         _store_chain_id(job_id, result.id)
@@ -143,7 +146,7 @@ def submit_study_materials(filepaths: list[str]) -> list[int]:
     return job_ids
 
 
-def submit_pyq_files(filepaths: list[str]) -> list[int]:
+def submit_pyq_files(filepaths: list[str], subject: str = "") -> list[int]:
     """
     Submit PYQ files for background processing.
 
@@ -154,6 +157,8 @@ def submit_pyq_files(filepaths: list[str]) -> list[int]:
     ----------
     filepaths : list[str]
         Paths to PYQ PDFs.
+    subject : str
+        User-assigned subject name.
 
     Returns
     -------
@@ -169,9 +174,9 @@ def submit_pyq_files(filepaths: list[str]) -> list[int]:
             log.warning(f"[submit] File not found: {filepath}")
             continue
 
-        job_id = _create_job(filepath, JobType.PYQ.value)
+        job_id = _create_job(filepath, JobType.PYQ.value, subject=subject)
 
-        result = process_pyq_task.apply_async(args=[filepath, job_id])
+        result = process_pyq_task.apply_async(args=[filepath, job_id, subject])
         _store_chain_id(job_id, result.id)
 
         log.info(f"[submit] PYQ Job {job_id}: {os.path.basename(filepath)} -> task {result.id}")

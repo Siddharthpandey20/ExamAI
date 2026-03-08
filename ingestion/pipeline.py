@@ -396,10 +396,17 @@ def _process_pptx(filepath: str) -> list[dict]:
     return final_pages
 
 
-def run_pipeline(filepath: str) -> str | None:
+def run_pipeline(filepath: str, knowledge_dir: str | None = None) -> str | None:
     """
     Run the full ingestion pipeline on a single file.
     Returns path to generated markdown in knowledge/, or None on failure.
+
+    Parameters
+    ----------
+    filepath : str
+        Path to the source PDF/PPTX file.
+    knowledge_dir : str or None
+        Custom output directory for markdown. Defaults to KNOWLEDGE_DIR.
     """
     ext = os.path.splitext(filepath)[1].lower()
     filename = os.path.basename(filepath)
@@ -418,7 +425,7 @@ def run_pipeline(filepath: str) -> str | None:
             return None
 
         print(f"[STAGE 6] Writing markdown:")
-        out_path = write_markdown(filename, pages)
+        out_path = write_markdown(filename, pages, knowledge_dir=knowledge_dir)
         print(f"[STAGE 6] {filename} -> {out_path}")
         return out_path
 

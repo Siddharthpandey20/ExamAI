@@ -53,6 +53,7 @@ def index_file(
     chroma: ChromaStore,
     embedder: Embedder,
     force: bool = False,
+    subject: str = "",
 ) -> dict:
     """
     Index a single enriched markdown file.
@@ -64,6 +65,7 @@ def index_file(
     chroma   : ChromaStore   — ChromaDB instance
     embedder : Embedder      — sentence-transformer encoder
     force    : bool          — if True, re-index even if hash matches
+    subject  : str           — user-assigned subject name
 
     Returns
     -------
@@ -114,7 +116,8 @@ def index_file(
     if existing:
         doc_id = existing.id
         # Update metadata in case structuring was re-run
-        existing.subject = doc_meta.subject
+        existing.subject = subject or doc_meta.subject
+        existing.ai_subject = doc_meta.subject
         existing.summary = doc_meta.summary
         existing.core_topics = core_topics_str
         existing.chapters_json = chapters_json
@@ -123,7 +126,7 @@ def index_file(
         chroma.delete_by_source(filename)
         doc = insert_document(
             session, filename, file_hash,
-            subject=doc_meta.subject,
+            subject=subject or doc_meta.subject,
             summary=doc_meta.summary,
             core_topics=core_topics_str,
             chapters_json=chapters_json,
@@ -145,6 +148,7 @@ def index_file(
             summary=s.summary,
             concepts=concepts_str,
             chapter=s.chapter,
+            subject=subject,
         )
         slide_ids.append(slide_obj.id)
 
@@ -173,6 +177,7 @@ def index_file(
             "slide_type": s.slide_type,
             "concepts": ", ".join(s.concepts),
             "chapter": s.chapter,
+            "subject": subject,
         })
 
     chroma.upsert_slides(

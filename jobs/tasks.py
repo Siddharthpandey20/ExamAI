@@ -143,7 +143,7 @@ def _complete_job(job_id):
 # ═════════════════════════════════════════════════════════════════════════
 
 @app.task(bind=True, name="jobs.ingest")
-def ingest_task(self, filepath, job_id):
+def ingest_task(self, filepath, job_id, subject=""):
     """
     Phase 1: Parse a raw upload (PDF/PPTX) into knowledge markdown.
 
@@ -154,14 +154,19 @@ def ingest_task(self, filepath, job_id):
 
     from ingestion.pipeline import run_pipeline
     from ingestion.tracker import is_processed, mark_processed
-    from ingestion.config import KNOWLEDGE_DIR
+    from indexing.config import get_subject_dirs
 
     filename = os.path.basename(filepath)
+    knowledge_dir = get_subject_dirs(subject)["knowledge"] if subject else None
 
     # ── Skip if already ingested ─────────────────────────────────────
     if is_processed(filepath):
         stem = os.path.splitext(filename)[0]
-        md_path = os.path.join(KNOWLEDGE_DIR, f"{stem}.md")
+        if knowledge_dir:
+            md_path = os.path.join(knowledge_dir, f"{stem}.md")
+        else:
+            from ingestion.config import KNOWLEDGE_DIR
+            md_path = os.path.join(KNOWLEDGE_DIR, f"{stem}.md")
         if os.path.exists(md_path):
             log.info(f"[ingest] '{filename}' already ingested -> skipped")
             _update_phase(job_id, "ingest", PhaseStatus.SKIPPED.value)
@@ -171,7 +176,7 @@ def ingest_task(self, filepath, job_id):
     _update_phase(job_id, "ingest", PhaseStatus.RUNNING.value, task_id=self.request.id)
 
     try:
-        md_path = run_pipeline(filepath)
+        md_path = run_pipeline(filepath, knowledge_dir=knowledge_dir)
         if not md_path:
             raise RuntimeError(f"Ingestion produced no output for '{filename}'")
 
@@ -227,7 +232,7 @@ def structure_task(self, md_path, job_id):
 
 
 @app.task(bind=True, name="jobs.index")
-def index_task(self, md_path, job_id):
+def index_task(self, md_path, job_id, subject=""):
     """
     Phase 3: Embed structured knowledge into ChromaDB + SQLite.
 
@@ -258,7 +263,7 @@ def index_task(self, md_path, job_id):
 
     try:
         with get_db() as session:
-            result = index_file(md_path, session, chroma, embedder)
+            result = index_file(md_path, session, chroma, embedder, subject=subject)
 
         _update_phase(job_id, "index", PhaseStatus.COMPLETED.value)
         _complete_job(job_id)
@@ -280,7 +285,7 @@ def index_task(self, md_path, job_id):
 # ═════════════════════════════════════════════════════════════════════════
 
 @app.task(bind=True, name="jobs.process_pyq")
-def process_pyq_task(self, filepath, job_id):
+def process_pyq_task(self, filepath, job_id, subject=""):
     """
     Process a PYQ file through all three phases sequentially:
 
@@ -369,7 +374,7 @@ def process_pyq_task(self, filepath, job_id):
                     chroma=chroma,
                     bm25_index=bm25_index,
                 )
-                record_matches(session, q, matches, source_file=filename)
+                record_matches(session, q, matches, source_file=filename, subject=subject)
                 total_matches += len(matches)
 
             recompute_importance_scores(session)

@@ -78,6 +78,7 @@ def upsert_slide(
     summary: str,
     concepts: str,
     chapter: str,
+    subject: str = "",
 ) -> Slide:
     """Insert or update a slide record. Returns the ORM object."""
     slide = (
@@ -92,6 +93,7 @@ def upsert_slide(
         slide.summary = summary
         slide.concepts = concepts
         slide.chapter = chapter
+        slide.subject = subject
         slide.is_embedded = False
     else:
         slide = Slide(
@@ -103,6 +105,7 @@ def upsert_slide(
             summary=summary,
             concepts=concepts,
             chapter=chapter,
+            subject=subject,
             is_embedded=False,
         )
         session.add(slide)

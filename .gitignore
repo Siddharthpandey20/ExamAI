@@ -8,3 +8,5 @@ try.py
 test.py 
 test_db_inspect.py
 rough.py
+migrate_to_subjects.py
+SYSTEM.md

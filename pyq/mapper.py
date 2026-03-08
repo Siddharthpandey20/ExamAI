@@ -58,6 +58,7 @@ def record_matches(
     question: ExtractedQuestion,
     matches: list[RRFResult],
     source_file: str,
+    subject: str = "",
 ) -> PYQQuestion | None:
     """
     Record a single question and its matched slides in SQLite.
@@ -72,6 +73,8 @@ def record_matches(
         Filtered RRF results (top K above threshold).
     source_file : str
         Source PYQ filename for tracking.
+    subject : str
+        User-assigned subject name.
 
     Returns
     -------
@@ -86,6 +89,7 @@ def record_matches(
     pyq_q = PYQQuestion(
         question_text=question.question_text,
         source_file=source_file,
+        subject=subject,
     )
     session.add(pyq_q)
     session.flush()  # get pyq_q.id

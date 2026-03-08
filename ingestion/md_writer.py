@@ -116,16 +116,26 @@ def build_markdown(filename: str, pages: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def write_markdown(filename: str, pages: list[dict]) -> str:
+def write_markdown(filename: str, pages: list[dict], knowledge_dir: str | None = None) -> str:
     """
     Build markdown and write it to knowledge/<stem>.md.
     Returns the output file path.
+
+    Parameters
+    ----------
+    filename : str
+        Original filename (e.g. "lecture.pdf").
+    pages : list[dict]
+        Processed page data from the pipeline.
+    knowledge_dir : str or None
+        Custom output directory. Defaults to KNOWLEDGE_DIR from config.
     """
-    os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
+    out_dir = knowledge_dir or KNOWLEDGE_DIR
+    os.makedirs(out_dir, exist_ok=True)
 
     md_content = build_markdown(filename, pages)
     stem = os.path.splitext(filename)[0]
-    out_path = os.path.join(KNOWLEDGE_DIR, f"{stem}.md")
+    out_path = os.path.join(out_dir, f"{stem}.md")
 
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(md_content)

@@ -55,6 +55,7 @@ class Job(Base):
     filepath        = Column(String, nullable=False)
     job_type        = Column(String, nullable=False, default=JobType.STUDY_MATERIAL.value)
     status          = Column(String, nullable=False, default=JobStatus.PENDING.value)
+    subject         = Column(String, nullable=True, index=True)
     current_phase   = Column(String, nullable=True)
     celery_chain_id = Column(String, nullable=True)
     created_at      = Column(DateTime, default=lambda: datetime.now(timezone.utc))

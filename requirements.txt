@@ -21,3 +21,7 @@ rank-bm25
 
 # Job infrastructure
 celery[redis]
+
+# API layer
+fastapi[standard]
+python-multipart
