@@ -83,7 +83,7 @@ def list_subjects(db: Session = Depends(get_db_dep)):
 @router.post("", response_model=SubjectStats, status_code=201)
 def create_subject(body: SubjectCreate, db: Session = Depends(get_db_dep)):
     """Create a new subject and its data directories."""
-    name = body.name.strip()
+    name = body.name.strip().upper()
     if not name:
         raise HTTPException(status_code=400, detail="Subject name cannot be empty.")
 

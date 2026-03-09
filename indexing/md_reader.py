@@ -50,7 +50,7 @@ class SlideMeta:
         self.exam_signal: bool = False
         self.summary: str = ""
         self.raw_text: str = ""
-        self.chapter: str = ""               # resolved from doc chapters
+        self.chapter: str = ""              
 
 
 # ── Parser ───────────────────────────────────────────────────────────────
@@ -79,14 +79,17 @@ def _parse_overview(text: str) -> DocMeta:
     if m:
         meta.core_topics = [t.strip() for t in m.group(1).split(",") if t.strip()]
 
-    # Chapters
+    # Chapters — handle both "(slides 1-5)" and "(slides Page 1-5)" formats
     for cm in re.finditer(
-        r"-\s+\*\*(.+?)\*\*\s+\(slides\s+([\d\-,\s]+)\):\s*(.+)",
+        r"-\s+\*\*(.+?)\*\*\s+\(slides\s+(.+?)\):\s*(.+)",
         text,
     ):
+        raw_range = cm.group(2).strip()
+        # Normalize: strip "Page " prefix if present
+        raw_range = re.sub(r"(?i)^page\s+", "", raw_range)
         meta.chapters.append({
             "name": cm.group(1).strip(),
-            "slide_range": cm.group(2).strip(),
+            "slide_range": raw_range,
             "topics": cm.group(3).strip(),
         })
 
@@ -96,17 +99,26 @@ def _parse_overview(text: str) -> DocMeta:
 def _resolve_chapter(page_number: int, chapters: list[dict]) -> str:
     """Find which chapter a slide belongs to based on slide ranges."""
     for ch in chapters:
-        # Parse ranges like "1-5" or "1-6" or "7, 12, 16, 19, 28"
+        # Parse ranges like "1-5" or "1-6" or "7, 12, 16, 19, 28" or "Page 1-5"
         range_str = ch["slide_range"]
+        # Strip "Page " prefix if present
+        range_str = re.sub(r"(?i)^page\s+", "", range_str)
         for part in range_str.split(","):
             part = part.strip()
-            if "-" in part:
-                lo, hi = part.split("-", 1)
-                if int(lo) <= page_number <= int(hi):
-                    return ch["name"]
-            else:
-                if page_number == int(part):
-                    return ch["name"]
+            # Strip any remaining "Page " in individual parts
+            part = re.sub(r"(?i)^page\s+", "", part)
+            if not part:
+                continue
+            try:
+                if "-" in part:
+                    lo, hi = part.split("-", 1)
+                    if int(lo.strip()) <= page_number <= int(hi.strip()):
+                        return ch["name"]
+                else:
+                    if page_number == int(part):
+                        return ch["name"]
+            except ValueError:
+                continue
     return ""
 
 
@@ -129,6 +141,10 @@ def _parse_slide_metadata_line(line: str) -> dict:
     if m:
         raw = m.group(1).strip()
         result["concepts"] = [c.strip() for c in raw.split(",") if c.strip() and c.strip() != "—"]
+
+    m = re.search(r"\*\*Chapter:\*\*\s*(.+?)\s*\|", line)
+    if m:
+        result["chapter"] = m.group(1).strip()
 
     m = re.search(r"\*\*Exam Signal:\*\*\s*(\w+)", line)
     if m:
@@ -175,7 +191,6 @@ def parse_structured_markdown(filepath: str) -> tuple[DocMeta, list[SlideMeta]]:
 
         slide = SlideMeta()
         slide.page_number = page_num
-        slide.chapter = _resolve_chapter(page_num, doc_meta.chapters)
 
         # Parse metadata blockquote lines (lines starting with >)
         lines = block.split("\n")
@@ -188,10 +203,16 @@ def parse_structured_markdown(filepath: str) -> tuple[DocMeta, list[SlideMeta]]:
                 slide.slide_type = meta.get("slide_type", "other")
                 slide.concepts = meta.get("concepts", [])
                 slide.exam_signal = meta.get("exam_signal", False)
+                slide.chapter = meta.get("chapter", "")
             elif stripped.startswith(">") and "**Summary:**" in stripped:
                 slide.summary = _parse_slide_summary_line(stripped)
             else:
                 content_lines.append(line)
+
+        # Fallback: resolve chapter from document-level chapter ranges
+        # if the per-slide metadata didn't provide one
+        if not slide.chapter:
+            slide.chapter = _resolve_chapter(page_num, doc_meta.chapters)
 
         slide.raw_text = "\n".join(content_lines).strip()
         slides.append(slide)

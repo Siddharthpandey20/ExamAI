@@ -31,6 +31,7 @@ def _build_metadata_block(meta: SlideMetadata) -> str:
         f"> **Title:** {meta.parent_topic} | "
         f"**Type:** {meta.slide_type.value} | "
         f"**Concepts:** {concepts} | "
+        f"**Chapter:** {meta.chapter} | "
         f"**Exam Signal:** {exam}\n"
         f"> **Summary:** {meta.slide_summary}"
     )

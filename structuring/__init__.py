@@ -42,6 +42,8 @@ from structuring.file_agent import run_file_agent
 from structuring.slide_agent import run_slide_agent
 from structuring.md_writer import write_structured_markdown
 
+from agents import trace, custom_span
+
 log = logging.getLogger(__name__)
 
 
@@ -69,30 +71,33 @@ async def process_file(filepath: str) -> str | None:
     log.info(f"[START] Structuring: {fname}")
     log.info(f"{'='*60}")
 
-    # ── Parse ────────────────────────────────────────────────────────
-    doc_title, slides = parse_markdown(filepath)
-    if not slides:
-        log.warning(f"[Skip] No slides in {fname}")
-        return None
-    log.info(f"[Parse] {len(slides)} slides in '{doc_title}'")
+    with trace("structuring_pipeline"):
+        # ── Parse ────────────────────────────────────────────────────────
+        with custom_span("parse"):
+            doc_title, slides = parse_markdown(filepath)
+            if not slides:
+                log.warning(f"[Skip] No slides in {fname}")
+                return None
+            log.info(f"[Parse] {len(slides)} slides in '{doc_title}'")
 
-    # ── Agent 1: File-Level (Ollama) ─────────────────────────────────
-    log.info("[Agent 1] Starting file-level analysis (Ollama)...")
-    overview, global_summary = await run_file_agent(doc_title, slides)
+        # ── Agent 1: File-Level (Ollama) ─────────────────────────────────
+        log.info("[Agent 1] Starting file-level analysis (Ollama)...")
+        overview, global_summary = await run_file_agent(doc_title, slides)
 
-    # ── HANDOFF: Agent 1 → Agent 2 ──────────────────────────────────
-    log.info("[Handoff] Injecting file context into slide agent...")
+        # ── HANDOFF: Agent 1 → Agent 2 ──────────────────────────────────
+        log.info("[Handoff] Injecting file context into slide agent...")
 
-    # ── Agent 2: Slide-Level (Groq) ─────────────────────────────────
-    log.info("[Agent 2] Starting slide classification (Groq)...")
-    slide_metadata = await run_slide_agent(overview, slides)
-    log.info(f"[Agent 2] {len(slide_metadata)} slides classified")
+        # ── Agent 2: Slide-Level (Groq) ─────────────────────────────────
+        log.info("[Agent 2] Starting slide classification (Groq)...")
+        slide_metadata = await run_slide_agent(overview, slides)
+        log.info(f"[Agent 2] {len(slide_metadata)} slides classified")
 
-    # ── Write structured markdown ────────────────────────────────────
-    log.info("[Writer] Writing enriched markdown...")
-    out_path = write_structured_markdown(
-        filepath, overview, global_summary, slides, slide_metadata
-    )
+        # ── Write structured markdown ────────────────────────────────────
+        with custom_span("write_output"):
+            log.info("[Writer] Writing enriched markdown...")
+            out_path = write_structured_markdown(
+                filepath, overview, global_summary, slides, slide_metadata
+            )
 
     log.info(f"[DONE] {fname} structured → {out_path}")
     return out_path

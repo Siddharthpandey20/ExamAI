@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from agents import Agent, Runner, ModelSettings, RunConfig
 from agents.models.openai_provider import OpenAIProvider
-from agents.tracing import trace
+from agents import custom_span
 
 from structuring.config import (
     SLIDE_BATCH_SIZE,
@@ -114,7 +114,7 @@ async def run_slide_agent(
     The overview from Agent 1 is injected into Agent 2's instructions.
     Rate-limited to GEMINI_MAX_CALLS_PER_MINUTE calls/min.
     """
-    with trace("slide_agent_pipeline", metadata={"slides": str(len(slides))}):
+    with custom_span("slide_agent"):
         instructions = build_instructions_slide_agent(overview)
 
         all_metadata: list[SlideMetadata] = []
@@ -139,29 +139,31 @@ async def run_slide_agent(
             # Rate limit
             await _limiter.acquire()
 
-            try:
-                completion =await client.beta.chat.completions.parse(
-                    model=GEMINI_MODEL,
-                    messages=[
-                        {"role": "system", "content": instructions},
-                        {"role": "user", "content": batch_text},
-                    ],
-                    response_format=SlideBatchResponse,
-                )
-                batch_response: SlideBatchResponse = completion.choices[0].message.parsed
-                all_metadata.extend(batch_response.slides)
-                log.info(f"[Agent 2] Batch {batch_num} — {len(batch_response.slides)} slides classified")
-            except Exception as e:
-                log.error(f"[Agent 2] Batch {batch_num} failed: {e}")
-                for slide in batch:
-                    all_metadata.append(SlideMetadata(
-                        slide_number=slide.slide_number,
-                        parent_topic="Unknown",
-                        slide_type=SlideType.OTHER,
-                        core_concepts=[],
-                        exam_signals=False,
-                        slide_summary=f"[Classification failed] {slide.header}",
-                    ))
+            with custom_span(f"batch_{batch_num}"):
+                try:
+                    completion =await client.beta.chat.completions.parse(
+                        model=GEMINI_MODEL,
+                        messages=[
+                            {"role": "system", "content": instructions},
+                            {"role": "user", "content": batch_text},
+                        ],
+                        response_format=SlideBatchResponse,
+                    )
+                    batch_response: SlideBatchResponse = completion.choices[0].message.parsed
+                    all_metadata.extend(batch_response.slides)
+                    log.info(f"[Agent 2] Batch {batch_num} — {len(batch_response.slides)} slides classified")
+                except Exception as e:
+                    log.error(f"[Agent 2] Batch {batch_num} failed: {e}")
+                    for slide in batch:
+                        all_metadata.append(SlideMetadata(
+                            slide_number=slide.slide_number,
+                            parent_topic="Unknown",
+                            slide_type=SlideType.OTHER,
+                            core_concepts=[],
+                            exam_signals=False,
+                            slide_summary=f"[Classification failed] {slide.header}",
+                            chapter="Unknown",
+                        ))
 
         all_metadata.sort(key=lambda m: m.slide_number)
         return all_metadata

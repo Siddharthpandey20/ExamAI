@@ -34,9 +34,10 @@ def _validate_file(file: UploadFile):
 def _resolve_subject(subject: str, db: Session) -> str:
     """
     Resolve subject name: must already exist in DB.
+    Normalizes to UPPERCASE before lookup.
     Returns the canonical subject name.
     """
-    name = subject.strip()
+    name = subject.strip().upper()
     if not name:
         raise HTTPException(status_code=400, detail="Subject name is required.")
 

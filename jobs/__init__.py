@@ -114,7 +114,7 @@ def submit_study_materials(filepaths: list[str], subject: str = "") -> list[int]
     filepaths : list[str]
         Paths to raw upload files (PDF, PPTX).
     subject : str
-        User-assigned subject name.
+        User-assigned subject name (will be uppercased).
 
     Returns
     -------
@@ -122,6 +122,8 @@ def submit_study_materials(filepaths: list[str], subject: str = "") -> list[int]
         Job IDs for tracking progress via get_job_status().
     """
     from jobs.tasks import ingest_task, structure_task, index_task
+
+    subject = subject.strip().upper() if subject else ""
 
     job_ids = []
     for filepath in filepaths:

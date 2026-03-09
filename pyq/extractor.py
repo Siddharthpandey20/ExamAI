@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from agents import Agent, Runner, RunConfig
 from agents.models.openai_provider import OpenAIProvider
-from agents.tracing import trace
+from agents import trace, custom_span
 
 from pyq.config import OLLAMA_BASE_URL, OLLAMA_MODEL
 from pyq.schemas import ExtractedQuestionList
@@ -67,13 +67,14 @@ def _build_extraction_prompt(raw_text: str, source_hint: str = "") -> str:
 
 async def _extract_async(raw_text: str, source_hint: str = "") -> ExtractedQuestionList:
     """Run the extraction agent asynchronously."""
-    with trace("PYQ EXTRACTION", metadata={"text_length": str(len(raw_text))}):
-        prompt = _build_extraction_prompt(raw_text, source_hint)
-        result = await Runner.run(
-        _extraction_agent,
-        input=prompt,
-        run_config=_run_config,
-        )
+    with trace("pyq_extraction_pipeline"):
+        with custom_span("question_extraction"):
+            prompt = _build_extraction_prompt(raw_text, source_hint)
+            result = await Runner.run(
+            _extraction_agent,
+            input=prompt,
+            run_config=_run_config,
+            )
     return result.final_output
 
 

@@ -26,9 +26,21 @@ def main():
     if force:
         args.remove("--force")
 
+    # Extract --subject NAME
+    subject = ""
+    if "--subject" in args:
+        idx = args.index("--subject")
+        if idx + 1 < len(args):
+            subject = args[idx + 1].upper()
+            args.pop(idx + 1)
+            args.pop(idx)
+        else:
+            print("ERROR: --subject requires a value")
+            sys.exit(1)
+
     filepath = args[0] if args else None
 
-    results = run_indexing(filepath=filepath, force=force)
+    results = run_indexing(filepath=filepath, force=force, subject=subject)
 
     # Print summary table
     print("\n" + "=" * 60)

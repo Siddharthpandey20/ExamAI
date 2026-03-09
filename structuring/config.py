@@ -21,6 +21,12 @@ OLLAMA_MODEL = "llama3"
 # If entire file is shorter, send the whole thing.
 PREVIEW_CHAR_LIMIT = 6000
 
+# ── Chunked overview settings ────────────────────────────────────────────
+# Slides per chunk for the two-stage overview (Stage 1: local overviews)
+OVERVIEW_CHUNK_SIZE = 35
+# Max concurrent Ollama calls (keep low to avoid overloading local model)
+OLLAMA_MAX_CONCURRENCY = 3
+
 # ── Groq (Slide-Level Agent) ────────────────────────────────────────────
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"

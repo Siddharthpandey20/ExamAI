@@ -51,6 +51,16 @@ class ChapterInfo(BaseModel):
     key_topics: list[str] = Field(description="Main topics in this chapter")
 
 
+class ChunkOverview(BaseModel):
+    """Stage 1 output: local overview for a chunk of 30-40 slides."""
+    chunk_id: int = Field(description="Sequential chunk number starting from 1")
+    local_topics: list[str] = Field(description="Main topics found in this chunk")
+    local_chapters: list[ChapterInfo] = Field(description="Chapters found in this chunk")
+    topic_keywords: list[str] = Field(description="Important keywords from this chunk")
+    slide_range_local: str = Field(description="e.g. '1-35' — the slide range this chunk covers")
+    chunk_summary: str = Field(description="2-3 sentence summary of this chunk")
+
+
 class DocumentOverview(BaseModel):
     """Agent 1 Step 1: high-level document structure."""
     document_title: str
@@ -58,6 +68,7 @@ class DocumentOverview(BaseModel):
     overarching_summary: str = Field(description="2-3 sentence summary of the entire document")
     chapters: list[ChapterInfo]
     total_slides: int
+    ai_subject: str = Field(description="AI-extracted subject, may differ from filename or user input")
 
 
 class ChapterSummary(BaseModel):
@@ -91,6 +102,7 @@ class SlideMetadata(BaseModel):
         description="True if slide has exam hints: Summary, Comparison, Note, Important, Remember"
     )
     slide_summary: str = Field(description="1-2 sentence clean summary")
+    chapter: str = Field(description="Chapter name as per the content and similar to DocumentOverview")
 
 
 class SlideBatchResponse(BaseModel):

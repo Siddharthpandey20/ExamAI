@@ -22,6 +22,42 @@ from structuring.schemas import ParsedSlide
 from structuring.config import PREVIEW_CHAR_LIMIT
 
 
+# ── OCR / table noise cleanup ────────────────────────────────────────────
+
+# Empty table rows: cells with only whitespace
+_RE_EMPTY_TABLE_ROW = re.compile(r"^\|(?:\s*\|)+\s*$", re.MULTILINE)
+# Separator-only rows:  | --- | --- | or | :---: |
+_RE_TABLE_SEPARATOR  = re.compile(r"^\|(?:\s*:?-{2,}:?\s*\|)+\s*$", re.MULTILINE)
+# Repeated blank lines (3+) → collapse to 2
+_RE_EXCESS_BLANKS    = re.compile(r"\n{3,}")
+# OCR "Extracted from Image" blocks (header + everything until next ### or EOF)
+_RE_OCR_BLOCK        = re.compile(r"###\s+Extracted from Image.*?(?=###|\Z)", re.DOTALL)
+# Stray page-number lines (e.g. bare "12" or "Page 12" on its own line)
+_RE_STRAY_PAGE_NUM   = re.compile(r"^(?:Page\s+)?\d{1,3}\s*$", re.MULTILINE)
+# Runs of whitespace-only lines inside table remnants
+_RE_WHITESPACE_LINES = re.compile(r"^\s+$", re.MULTILINE)
+
+
+def clean_for_llm(text: str) -> str:
+    """
+    Remove OCR / extraction noise before sending content to an LLM.
+
+    Strips:
+      - Empty table rows  (|  |  |  |)
+      - Table separator rows (| --- | --- |)
+      - OCR "Extracted from Image" blocks
+      - Stray page-number lines
+      - Excessive blank lines
+    """
+    text = _RE_EMPTY_TABLE_ROW.sub("", text)
+    text = _RE_TABLE_SEPARATOR.sub("", text)
+    text = _RE_OCR_BLOCK.sub("[OCR content]\n", text)
+    text = _RE_STRAY_PAGE_NUM.sub("", text)
+    text = _RE_WHITESPACE_LINES.sub("", text)
+    text = _RE_EXCESS_BLANKS.sub("\n\n", text)
+    return text.strip()
+
+
 def _extract_preview(header: str, content: str, max_sentences: int = 3) -> str:
     """
     Build a short preview: header + first N sentences of the content.
@@ -110,10 +146,10 @@ def build_preview_document(slides: list[ParsedSlide]) -> str:
     total_chars = sum(s.char_count for s in slides)
 
     if total_chars <= PREVIEW_CHAR_LIMIT:
-        # Small document — send everything
-        parts = [f"{s.header}\n{s.content}" for s in slides]
+        # Small document — send everything (cleaned)
+        parts = [f"{s.header}\n{clean_for_llm(s.content)}" for s in slides]
     else:
-        # Large document — send only previews
+        # Large document — send only previews (already cleaned at parse time)
         parts = [s.preview for s in slides]
 
     return "\n\n".join(parts)
@@ -124,13 +160,26 @@ def get_chapter_slides(
 ) -> list[ParsedSlide]:
     """
     Given a slide range string like '1-5' or '3-8', return the matching slides.
-    Handles single numbers ('5') and ranges ('5-10').
+    Handles single numbers ('5'), ranges ('5-10'), and comma-separated ('1-5, 8-12').
+    Also handles 'Page ' prefix if present.
     """
-    parts = slide_range.strip().split("-")
-    try:
-        start = int(parts[0].strip())
-        end = int(parts[-1].strip())
-    except (ValueError, IndexError):
-        return []
+    import re as _re
+    # Strip "Page " prefix if present
+    cleaned = _re.sub(r"(?i)^page\s+", "", slide_range.strip())
 
-    return [s for s in slides if start <= s.slide_number <= end]
+    slide_nums = set()
+    for part in cleaned.split(","):
+        part = part.strip()
+        part = _re.sub(r"(?i)^page\s+", "", part)  # strip from individual parts too
+        if not part:
+            continue
+        try:
+            if "-" in part:
+                lo, hi = part.split("-", 1)
+                slide_nums.update(range(int(lo.strip()), int(hi.strip()) + 1))
+            else:
+                slide_nums.add(int(part))
+        except ValueError:
+            continue
+
+    return [s for s in slides if s.slide_number in slide_nums]

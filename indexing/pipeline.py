@@ -47,6 +47,21 @@ def _is_structured(filepath: str) -> bool:
     return "## Document Overview" in head
 
 
+def _infer_subject_from_path(filepath: str) -> str:
+    """
+    Try to infer subject from the file path.
+    e.g. 'data/ML/knowledge/file.md' → 'ML'
+    Looks for the pattern data/{SUBJECT}/knowledge/...
+    Returns uppercase subject name, or empty string if not inferrable.
+    """
+    import re
+    norm = filepath.replace("\\", "/")
+    m = re.search(r"data/([^/]+)/knowledge/", norm)
+    if m:
+        return m.group(1).upper()
+    return ""
+
+
 def index_file(
     filepath: str,
     session: Session,
@@ -109,15 +124,27 @@ def index_file(
 
     # ── Step 4: Upsert document in SQLite ────────────────────────────
     import json
+    from indexing.models import Subject
     chapters_json = json.dumps(doc_meta.chapters, ensure_ascii=False)
     core_topics_str = ", ".join(doc_meta.core_topics)
+
+    # Resolve subject: prefer user-given subject, then infer from path, never use AI subject
+    resolved_subject_id = None
+    subject_name = subject.upper() if subject else _infer_subject_from_path(filepath)
+    if subject_name:
+        subject_row = session.query(Subject).filter(Subject.name == subject_name).first()
+        if subject_row:
+            resolved_subject_id = subject_row.id
+        else:
+            log.warning(f"[Pipeline] Subject '{subject_name}' not found in subjects table")
 
     existing = get_document_by_hash(session, file_hash)
     if existing:
         doc_id = existing.id
         # Update metadata in case structuring was re-run
-        existing.subject = subject or doc_meta.subject
+        existing.subject = subject_name
         existing.ai_subject = doc_meta.subject
+        existing.subject_id = resolved_subject_id
         existing.summary = doc_meta.summary
         existing.core_topics = core_topics_str
         existing.chapters_json = chapters_json
@@ -126,7 +153,9 @@ def index_file(
         chroma.delete_by_source(filename)
         doc = insert_document(
             session, filename, file_hash,
-            subject=subject or doc_meta.subject,
+            subject=subject_name,
+            ai_subject=doc_meta.subject,
+            subject_id=resolved_subject_id,
             summary=doc_meta.summary,
             core_topics=core_topics_str,
             chapters_json=chapters_json,
@@ -148,7 +177,7 @@ def index_file(
             summary=s.summary,
             concepts=concepts_str,
             chapter=s.chapter,
-            subject=subject,
+            subject=subject_name,
         )
         slide_ids.append(slide_obj.id)
 
@@ -177,7 +206,7 @@ def index_file(
             "slide_type": s.slide_type,
             "concepts": ", ".join(s.concepts),
             "chapter": s.chapter,
-            "subject": subject,
+            "subject": subject_name,
         })
 
     chroma.upsert_slides(
@@ -195,7 +224,7 @@ def index_file(
     return result
 
 
-def run_indexing(filepath: str | None = None, force: bool = False) -> list[dict]:
+def run_indexing(filepath: str | None = None, force: bool = False, subject: str = "") -> list[dict]:
     """
     Run the indexing pipeline.
 
@@ -206,6 +235,9 @@ def run_indexing(filepath: str | None = None, force: bool = False) -> list[dict]
         If None, index all .md files in KNOWLEDGE_DIR.
     force : bool
         Re-index even if the file hash already exists in SQLite.
+    subject : str
+        User-assigned subject name (will be uppercased).
+        If empty, inferred from file path.
 
     Returns
     -------
@@ -231,7 +263,7 @@ def run_indexing(filepath: str | None = None, force: bool = False) -> list[dict]
     for fpath in files:
         # Each file gets its own session → commit/rollback per file
         with get_db() as session:
-            result = index_file(fpath, session, chroma, embedder, force=force)
+            result = index_file(fpath, session, chroma, embedder, force=force, subject=subject)
             results.append(result)
 
     # ── Summary ──────────────────────────────────────────────────
