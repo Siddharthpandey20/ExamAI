@@ -155,6 +155,7 @@ RULES:
 - If partially covered, say what IS covered and what is missing
 - If not covered, suggest the closest related topic from the slides
 - Never say "based on the data" — speak directly
+-If the topic is completely missing,out of context of the subject or too vague, say it does not appear to be covered at all.
 """
 
 

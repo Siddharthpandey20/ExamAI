@@ -112,6 +112,7 @@ def create_subject(body: SubjectCreate, db: Session = Depends(get_db_dep)):
 @router.get("/{name}", response_model=SubjectDetail)
 def get_subject(name: str, db: Session = Depends(get_db_dep)):
     """Get detailed info for a specific subject."""
+    name=name.strip().upper()
     subject = db.query(Subject).filter(Subject.name == name).first()
     if not subject:
         raise HTTPException(status_code=404, detail=f"Subject '{name}' not found.")
