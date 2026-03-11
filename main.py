@@ -12,7 +12,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from indexing.database import init_db
 
 logging.basicConfig(
@@ -54,11 +53,16 @@ app.add_middleware(
 from routes.subjects import router as subjects_router
 from routes.uploads import router as uploads_router
 from routes.jobs import router as jobs_router
+from routes.search import router as search_router
+from routes.exam import router as exam_router
+from routes.documents import router as documents_router
 
 app.include_router(subjects_router, prefix="/api/subjects", tags=["Subjects"])
 app.include_router(uploads_router, prefix="/api/upload", tags=["Upload"])
 app.include_router(jobs_router, prefix="/api/jobs", tags=["Jobs"])
-
+app.include_router(search_router, prefix="/api/search", tags=["Search"])
+app.include_router(exam_router, prefix="/api/exam", tags=["Exam Intelligence"])
+app.include_router(documents_router, prefix="/api/documents", tags=["Documents"])
 
 @app.get("/api/health")
 def health_check():

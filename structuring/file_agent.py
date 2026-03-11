@@ -15,6 +15,7 @@ import asyncio
 import logging
 import math
 import re
+import threading
 
 from openai import AsyncOpenAI
 from agents import Agent, Runner, ModelSettings, RunConfig
@@ -35,6 +36,7 @@ from structuring.schemas import (
     GlobalDocumentSummary,
 )
 from structuring.md_parser import build_preview_document, get_chapter_slides, clean_for_llm
+from structuring.rate_limiter import RedisSemaphore, semaphore_slot
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -45,8 +47,20 @@ _ollama_client = AsyncOpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 _ollama_provider = OpenAIProvider(openai_client=_ollama_client, use_responses=False)
 _run_config = RunConfig(model_provider=_ollama_provider)
 
-# Semaphore to limit concurrent Ollama calls (avoid overloading local GPU)
-_ollama_sem = asyncio.Semaphore(OLLAMA_MAX_CONCURRENCY)
+# Distributed concurrency gate for Ollama (backed by Redis, local fallback).
+# Limits concurrent Ollama calls across ALL Celery worker processes to avoid
+# overwhelming the local model. Falls back to a threading.Semaphore if Redis
+# is unavailable.
+_ollama_gate = RedisSemaphore(
+    name="ollama",
+    max_concurrent=OLLAMA_MAX_CONCURRENCY,
+    ttl=120.0,
+)
+
+
+def _ollama_slot():
+    """Acquire one Ollama concurrency slot (distributed via Redis)."""
+    return semaphore_slot(_ollama_gate)
 
 
 # ── Stage 1a: Chunk Overview Agent ───────────────────────────────────────
@@ -245,7 +259,7 @@ async def _two_stage_overview(
     chunk_overviews: list[ChunkOverview] = []
 
     async def _run_chunk(chunk_id: int, chunk_slides: list[ParsedSlide], first: int, last: int):
-        async with _ollama_sem:
+        async with _ollama_slot():
             with custom_span(f"chunk_{chunk_id}"):
                 preview = build_preview_document(chunk_slides)
                 chunk_input = (
@@ -381,7 +395,7 @@ async def _parallel_chapter_map(
     """Run chapter summarization in parallel, limited by semaphore."""
 
     async def _summarize_chapter(chapter: ChapterInfo) -> ChapterSummary | None:
-        async with _ollama_sem:
+        async with _ollama_slot():
             with custom_span(f"chapter_{chapter.chapter_name}"):
                 chapter_slides = get_chapter_slides(slides, chapter.slide_range)
                 if not chapter_slides:

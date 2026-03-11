@@ -22,7 +22,7 @@ app.conf.update(
     accept_content=["json"],
     result_serializer="json",
 
-    # Timezone
+    # Timezone — internal Celery uses UTC; IST conversion happens in status.py
     timezone="UTC",
     enable_utc=True,
 
@@ -31,6 +31,9 @@ app.conf.update(
     worker_prefetch_multiplier=1,       # fair scheduling across chains
     task_acks_late=True,                # ack after completion (crash safety)
     task_reject_on_worker_lost=True,    # re-queue if worker crashes mid-task
+
+    # Concurrency safety: limit concurrent tasks to prevent SQLite contention
+    worker_max_tasks_per_child=50,      # restart worker child after 50 tasks (leak prevention)
 
     # Results
     result_expires=86400,               # keep results for 24 hours

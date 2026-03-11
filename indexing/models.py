@@ -126,3 +126,22 @@ class PYQMatch(Base):
 
     def __repr__(self):
         return f"<PYQMatch pyq={self.pyq_id} slide={self.slide_id} sim={self.similarity_score:.3f}>"
+
+
+class QueryCache(Base):
+    """Cache LLM responses to avoid redundant API calls for repeated queries."""
+    __tablename__ = "query_cache"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    subject       = Column(String, nullable=False, index=True)
+    query_hash    = Column(String, nullable=False, unique=True, index=True)
+    query_text    = Column(Text, nullable=False)
+    endpoint      = Column(String, nullable=False)   # search / coverage / study-plan / revision
+    response_json = Column(Text, nullable=False)      # full JSON response
+    model_used    = Column(String)
+    created_at    = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    # "doc_count:slide_count:pyq_count" — invalidate when content changes
+    content_fingerprint = Column(String, nullable=True)
+
+    def __repr__(self):
+        return f"<QueryCache id={self.id} subject='{self.subject}' endpoint='{self.endpoint}'>"

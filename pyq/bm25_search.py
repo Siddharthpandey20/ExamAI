@@ -11,7 +11,7 @@ import logging
 import re
 
 from rank_bm25 import BM25Okapi
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from indexing.models import Slide
 
@@ -42,20 +42,25 @@ class BM25Index:
         session : Session
             Active SQLAlchemy session to read slide data.
         """
+        # Eager-load the document relationship so we can read
+        # source_file after the session is closed.
         slides = (
             session.query(Slide)
             .filter(Slide.is_embedded == True)
+            .options(joinedload(Slide.document))
             .order_by(Slide.id)
             .all()
         )
 
         if not slides:
             log.warning("[BM25] No embedded slides found — index will be empty")
-            self._slide_lookup = {}
+            self._slide_data: dict[int, dict] = {}
             self._bm25 = None
             return
 
-        self._slide_lookup: dict[int, Slide] = {}
+        # Store plain dicts instead of ORM objects so the index
+        # stays usable after the building session is closed.
+        self._slide_data: dict[int, dict] = {}
         self._index_order: list[int] = []  # slide_id in BM25 corpus order
         corpus: list[list[str]] = []
 
@@ -73,7 +78,11 @@ class BM25Index:
             if not tokens:
                 continue
 
-            self._slide_lookup[slide.id] = slide
+            self._slide_data[slide.id] = {
+                "doc_id": slide.doc_id,
+                "page_number": slide.page_number,
+                "source_file": slide.document.filename if slide.document else "",
+            }
             self._index_order.append(slide.id)
             corpus.append(tokens)
 
@@ -121,12 +130,12 @@ class BM25Index:
 
         results = []
         for slide_id, score in scored[:top_n]:
-            slide = self._slide_lookup[slide_id]
+            data = self._slide_data[slide_id]
             results.append({
                 "slide_id": slide_id,
-                "doc_id": slide.doc_id,
-                "page_number": slide.page_number,
-                "source_file": slide.document.filename if slide.document else "",
+                "doc_id": data["doc_id"],
+                "page_number": data["page_number"],
+                "source_file": data["source_file"],
                 "bm25_score": float(score),
             })
 

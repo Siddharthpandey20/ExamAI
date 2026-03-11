@@ -341,62 +341,78 @@ def _run_ai_cleanup(merged_pages: list[dict]) -> list[dict]:
 # Full Pipeline Orchestration
 # ═══════════════════════════════════════════════════════════════════════
 
-def _process_pdf(filepath: str) -> list[dict]:
+def _process_pdf(filepath: str, progress_cb=None) -> list[dict]:
     """Full staged pipeline for a PDF file."""
     fname = os.path.basename(filepath)
+    _cb = progress_cb or (lambda pct, detail: None)
 
+    _cb(2, "Stage 1/6: Parsing PDF")
     print(f"\n[STAGE 1] Parsing PDF: {fname}")
     raw_pages = parse_pdf(filepath)
     print(f"[STAGE 1] Extracted {len(raw_pages)} pages.\n")
 
+    _cb(10, "Stage 2/6: Block segmentation")
     print(f"[STAGE 2] Block segmentation:")
     seg = _segment_pages(raw_pages)
     print()
 
+    _cb(15, f"Stage 3/6: OCR + table extraction ({len(seg['ocr_jobs'])} images)")
     print(f"[STAGE 3] Specialized extraction (OCR + Tables in parallel):")
     ocr_results = _run_ocr_parallel(seg["ocr_jobs"])
     table_results = _run_tables_parallel(filepath, seg["table_pages"])
     print()
 
+    _cb(50, "Stage 4/6: Merging blocks")
     print(f"[STAGE 4] Merging blocks:")
     merged = _merge_blocks(raw_pages, seg["text_map"], ocr_results, table_results)
     print()
 
+    pages_with_text = sum(1 for p in merged if p["native_text"].strip())
+    _cb(55, f"Stage 5/6: AI cleanup ({pages_with_text} pages)")
     print(f"[STAGE 5] AI cleanup via Ollama/Llama3:")
     final_pages = _run_ai_cleanup(merged)
     print()
 
+    _cb(95, "Stage 6/6: Writing markdown")
     return final_pages
 
 
-def _process_pptx(filepath: str) -> list[dict]:
+def _process_pptx(filepath: str, progress_cb=None) -> list[dict]:
     """Full staged pipeline for a PPTX file."""
     fname = os.path.basename(filepath)
+    _cb = progress_cb or (lambda pct, detail: None)
 
+    _cb(2, "Stage 1/5: Parsing PPTX")
     print(f"\n[STAGE 1] Parsing PPTX: {fname}")
     raw_slides = parse_pptx(filepath)
     print(f"[STAGE 1] Extracted {len(raw_slides)} slides.\n")
 
+    _cb(10, "Stage 2/5: Block segmentation")
     print(f"[STAGE 2] Block segmentation:")
     seg = _segment_pages(raw_slides)
     print()
 
+    _cb(15, f"Stage 3/5: OCR ({len(seg['ocr_jobs'])} images)")
     print(f"[STAGE 3] Specialized extraction (OCR in parallel):")
     ocr_results = _run_ocr_parallel(seg["ocr_jobs"])
     print()
 
+    _cb(50, "Stage 4/5: Merging blocks")
     print(f"[STAGE 4] Merging blocks:")
     merged = _merge_blocks(raw_slides, seg["text_map"], ocr_results, table_results={})
     print()
 
+    pages_with_text = sum(1 for p in merged if p["native_text"].strip())
+    _cb(55, f"Stage 5/5: AI cleanup ({pages_with_text} slides)")
     print(f"[STAGE 5] AI cleanup via Ollama/Llama3:")
     final_pages = _run_ai_cleanup(merged)
     print()
 
+    _cb(95, "Writing markdown")
     return final_pages
 
 
-def run_pipeline(filepath: str, knowledge_dir: str | None = None) -> str | None:
+def run_pipeline(filepath: str, knowledge_dir: str | None = None, progress_cb=None) -> str | None:
     """
     Run the full ingestion pipeline on a single file.
     Returns path to generated markdown in knowledge/, or None on failure.
@@ -407,15 +423,17 @@ def run_pipeline(filepath: str, knowledge_dir: str | None = None) -> str | None:
         Path to the source PDF/PPTX file.
     knowledge_dir : str or None
         Custom output directory for markdown. Defaults to KNOWLEDGE_DIR.
+    progress_cb : callable or None
+        Callback(pct: int, detail: str) for progress reporting.
     """
     ext = os.path.splitext(filepath)[1].lower()
     filename = os.path.basename(filepath)
 
     try:
         if ext == ".pdf":
-            pages = _process_pdf(filepath)
+            pages = _process_pdf(filepath, progress_cb=progress_cb)
         elif ext in (".pptx", ".ppt"):
-            pages = _process_pptx(filepath)
+            pages = _process_pptx(filepath, progress_cb=progress_cb)
         else:
             print(f"[SKIP] Unsupported: {filepath}")
             return None

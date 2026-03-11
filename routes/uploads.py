@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from indexing.database import get_db_dep
-from indexing.models import Subject
+from indexing.models import Subject, Document
 from indexing.config import ensure_subject_dirs, get_subject_dirs
 
 router = APIRouter()
@@ -111,6 +111,19 @@ async def upload_pyq(
     _validate_file(file)
     subject_name = _resolve_subject(subject, db)
     ensure_subject_dirs(subject_name)
+
+    # Guard: PYQ uploads require at least one indexed study material document
+    doc_count = (
+        db.query(Document)
+        .filter(Document.subject == subject_name, Document.status == "processed")
+        .count()
+    )
+    if doc_count == 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Subject '{subject_name}' has no indexed study material yet. "
+                   "Upload and process study material before uploading PYQ papers.",
+        )
 
     filename = file.filename or "upload"
     dirs = get_subject_dirs(subject_name)

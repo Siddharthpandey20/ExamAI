@@ -84,6 +84,8 @@ class JobPhase(Base):
     started_at      = Column(DateTime, nullable=True)
     completed_at    = Column(DateTime, nullable=True)
     error_message   = Column(Text, nullable=True)
+    progress_pct    = Column(Integer, nullable=True, default=0)
+    progress_detail = Column(String, nullable=True)
 
     job = relationship("Job", back_populates="phases")
 

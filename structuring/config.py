@@ -36,9 +36,14 @@ GROQ_MODEL = "llama-3.3-70b-versatile"
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_FALLBACK_MODEL = "gemini-2.5-flash-lite"
 
 # Sliding window: slides per Gemini API call
 SLIDE_BATCH_SIZE = 25
+
+# If total slides <= BATCH_SIZE + this threshold, process in one call
+# to avoid wasting an API call on a tiny remainder batch.
+SLIDE_BATCH_MERGE_THRESHOLD = 12  # e.g. 25+12=37 slides → 1 call
 
 # Rate limiting: max calls per minute
 GROQ_MAX_CALLS_PER_MINUTE = 20

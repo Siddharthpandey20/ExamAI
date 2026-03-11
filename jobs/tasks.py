@@ -14,12 +14,14 @@ Design:
   - Already-processed files are detected and phases marked "skipped".
   - Heavy resources (Embedder, ChromaStore) are cached per worker process.
   - Errors are recorded in SQLite, then re-raised to stop the chain.
+  - All DB writes use _safe_db_op() with retry to handle transient SQLite locks.
 """
 
 import os
 import logging
 import asyncio
 import threading
+import time
 from datetime import datetime, timezone
 
 from jobs.celery_app import app
@@ -30,6 +32,10 @@ from jobs.models import (
 from indexing.database import get_db, init_db
 
 log = logging.getLogger(__name__)
+
+# Max retries and delay for transient SQLite lock errors
+_DB_RETRY_ATTEMPTS = 8
+_DB_RETRY_DELAY = 0.25  # seconds, doubles each retry (max ~32s total)
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -74,68 +80,125 @@ def _get_chroma():
 
 
 # ═════════════════════════════════════════════════════════════════════════
+# Safe DB write with retry (handles transient SQLite locks)
+# ═════════════════════════════════════════════════════════════════════════
+
+def _safe_db_op(fn):
+    """
+    Execute a callable that uses get_db() with retry on OperationalError.
+    Returns whatever *fn* returns so callers can retrieve results.
+    Prevents "database is locked" crashes when study_material and PYQ
+    chains run concurrently.
+    """
+    delay = _DB_RETRY_DELAY
+    for attempt in range(1, _DB_RETRY_ATTEMPTS + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            if "database is locked" in str(exc) and attempt < _DB_RETRY_ATTEMPTS:
+                log.warning(f"[db] Locked (attempt {attempt}/{_DB_RETRY_ATTEMPTS}), retrying in {delay:.1f}s")
+                time.sleep(delay)
+                delay *= 2
+            else:
+                raise
+
+
+# ═════════════════════════════════════════════════════════════════════════
 # Phase / Job status helpers
 # ═════════════════════════════════════════════════════════════════════════
 
-def _update_phase(job_id, phase, status, task_id=None, error=None):
+def _update_phase(job_id, phase, status, task_id=None, error=None, progress_pct=None, progress_detail=None):
     """Update a single phase's status and sync the parent job's tracking fields."""
-    with get_db() as session:
-        jp = (
-            session.query(JobPhase)
-            .filter(JobPhase.job_id == job_id, JobPhase.phase == phase)
-            .first()
-        )
-        if not jp:
-            return
+    def _op():
+        with get_db() as session:
+            jp = (
+                session.query(JobPhase)
+                .filter(JobPhase.job_id == job_id, JobPhase.phase == phase)
+                .first()
+            )
+            if not jp:
+                return
 
-        jp.status = status
-        if task_id:
-            jp.celery_task_id = task_id
-        if status == PhaseStatus.RUNNING.value:
-            jp.started_at = datetime.now(timezone.utc)
-        if status in (PhaseStatus.COMPLETED.value, PhaseStatus.SKIPPED.value,
-                       PhaseStatus.FAILED.value):
-            jp.completed_at = datetime.now(timezone.utc)
-        if error:
-            jp.error_message = error
+            jp.status = status
+            if task_id:
+                jp.celery_task_id = task_id
+            if status == PhaseStatus.RUNNING.value:
+                jp.started_at = datetime.now(timezone.utc)
+                if progress_pct is None:
+                    jp.progress_pct = 0
+            if status in (PhaseStatus.COMPLETED.value, PhaseStatus.SKIPPED.value,
+                           PhaseStatus.FAILED.value):
+                jp.completed_at = datetime.now(timezone.utc)
+                jp.progress_pct = 100
+                jp.progress_detail = None
+            if error:
+                jp.error_message = error
+            if progress_pct is not None:
+                jp.progress_pct = progress_pct
+            if progress_detail is not None:
+                jp.progress_detail = progress_detail
 
-        # Sync parent job
-        job = session.query(Job).filter(Job.id == job_id).first()
-        if job:
-            job.current_phase = phase
-            job.updated_at = datetime.now(timezone.utc)
-            if status == PhaseStatus.RUNNING.value and job.status == JobStatus.PENDING.value:
-                job.status = JobStatus.PROCESSING.value
+            # Sync parent job
+            job = session.query(Job).filter(Job.id == job_id).first()
+            if job:
+                job.current_phase = phase
+                job.updated_at = datetime.now(timezone.utc)
+                if status == PhaseStatus.RUNNING.value and job.status == JobStatus.PENDING.value:
+                    job.status = JobStatus.PROCESSING.value
+    _safe_db_op(_op)
+
+
+def _update_progress(job_id, phase, pct, detail=None):
+    """Lightweight mid-task progress update (no status change)."""
+    def _op():
+        with get_db() as session:
+            jp = (
+                session.query(JobPhase)
+                .filter(JobPhase.job_id == job_id, JobPhase.phase == phase)
+                .first()
+            )
+            if jp:
+                jp.progress_pct = pct
+                if detail is not None:
+                    jp.progress_detail = detail
+            job = session.query(Job).filter(Job.id == job_id).first()
+            if job:
+                job.updated_at = datetime.now(timezone.utc)
+    _safe_db_op(_op)
 
 
 def _fail_job(job_id, phase, error):
     """Mark a job and its current phase as failed."""
-    with get_db() as session:
-        jp = (
-            session.query(JobPhase)
-            .filter(JobPhase.job_id == job_id, JobPhase.phase == phase)
-            .first()
-        )
-        if jp:
-            jp.status = PhaseStatus.FAILED.value
-            jp.completed_at = datetime.now(timezone.utc)
-            jp.error_message = error
+    def _op():
+        with get_db() as session:
+            jp = (
+                session.query(JobPhase)
+                .filter(JobPhase.job_id == job_id, JobPhase.phase == phase)
+                .first()
+            )
+            if jp:
+                jp.status = PhaseStatus.FAILED.value
+                jp.completed_at = datetime.now(timezone.utc)
+                jp.error_message = error
 
-        job = session.query(Job).filter(Job.id == job_id).first()
-        if job:
-            job.status = JobStatus.FAILED.value
-            job.current_phase = phase
-            job.updated_at = datetime.now(timezone.utc)
-            job.error_message = error
+            job = session.query(Job).filter(Job.id == job_id).first()
+            if job:
+                job.status = JobStatus.FAILED.value
+                job.current_phase = phase
+                job.updated_at = datetime.now(timezone.utc)
+                job.error_message = error
+    _safe_db_op(_op)
 
 
 def _complete_job(job_id):
     """Mark a job as successfully completed."""
-    with get_db() as session:
-        job = session.query(Job).filter(Job.id == job_id).first()
-        if job:
-            job.status = JobStatus.COMPLETED.value
-            job.updated_at = datetime.now(timezone.utc)
+    def _op():
+        with get_db() as session:
+            job = session.query(Job).filter(Job.id == job_id).first()
+            if job:
+                job.status = JobStatus.COMPLETED.value
+                job.updated_at = datetime.now(timezone.utc)
+    _safe_db_op(_op)
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -173,10 +236,14 @@ def ingest_task(self, filepath, job_id, subject=""):
             return md_path
 
     # ── Run ingestion ────────────────────────────────────────────────
-    _update_phase(job_id, "ingest", PhaseStatus.RUNNING.value, task_id=self.request.id)
+    _update_phase(job_id, "ingest", PhaseStatus.RUNNING.value, task_id=self.request.id,
+                  progress_detail="Starting ingestion")
+
+    def _ingest_progress(pct, detail):
+        _update_progress(job_id, "ingest", pct, detail)
 
     try:
-        md_path = run_pipeline(filepath, knowledge_dir=knowledge_dir)
+        md_path = run_pipeline(filepath, knowledge_dir=knowledge_dir, progress_cb=_ingest_progress)
         if not md_path:
             raise RuntimeError(f"Ingestion produced no output for '{filename}'")
 
@@ -213,9 +280,11 @@ def structure_task(self, md_path, job_id):
         return md_path
 
     # ── Run structuring (async → sync bridge) ────────────────────────
-    _update_phase(job_id, "structure", PhaseStatus.RUNNING.value, task_id=self.request.id)
+    _update_phase(job_id, "structure", PhaseStatus.RUNNING.value, task_id=self.request.id,
+                  progress_detail="Running LLM classification")
 
     try:
+        _update_progress(job_id, "structure", 10, "Agent 1: Document overview (Ollama)")
         result = asyncio.run(process_file(md_path))
         if not result:
             raise RuntimeError(f"Structuring produced no output for '{filename}'")
@@ -259,15 +328,23 @@ def index_task(self, md_path, job_id, subject=""):
             return {"md_path": md_path, "status": "skipped", "slides": 0}
 
     # ── Run indexing ─────────────────────────────────────────────────
-    _update_phase(job_id, "index", PhaseStatus.RUNNING.value, task_id=self.request.id)
+    _update_phase(job_id, "index", PhaseStatus.RUNNING.value, task_id=self.request.id,
+                  progress_detail="Loading embedder")
 
     try:
+        _update_progress(job_id, "index", 20, "Parsing structured markdown")
         with get_db() as session:
             result = index_file(md_path, session, chroma, embedder, subject=subject)
 
         _update_phase(job_id, "index", PhaseStatus.COMPLETED.value)
         _complete_job(job_id)
         log.info(f"[index] Done: {filename} — {result['slides_indexed']} slides")
+
+        # ── Auto re-map: if PYQ questions exist for this subject,
+        #    re-run mapping so the new slides get scored too ──────────
+        if subject:
+            _trigger_pyq_remap(subject)
+
         return {
             "md_path": md_path,
             "status": result["status"],
@@ -309,7 +386,8 @@ def process_pyq_task(self, filepath, job_id, subject=""):
     chroma = _get_chroma()
 
     # ── Phase 1: Text extraction (OCR) ───────────────────────────────
-    _update_phase(job_id, "ingest_pyq", PhaseStatus.RUNNING.value, task_id=self.request.id)
+    _update_phase(job_id, "ingest_pyq", PhaseStatus.RUNNING.value, task_id=self.request.id,
+                  progress_detail="Extracting text via OCR")
 
     try:
         pages = extract_pyq_text(filepath)
@@ -338,7 +416,8 @@ def process_pyq_task(self, filepath, job_id, subject=""):
         raise
 
     # ── Phase 2: Question extraction (LLM) ───────────────────────────
-    _update_phase(job_id, "extract", PhaseStatus.RUNNING.value)
+    _update_phase(job_id, "extract", PhaseStatus.RUNNING.value,
+                  progress_detail="Sending to Llama3 for question extraction")
 
     try:
         source_hint = os.path.splitext(filename)[0]
@@ -359,25 +438,52 @@ def process_pyq_task(self, filepath, job_id, subject=""):
         raise
 
     # ── Phase 3: Hybrid search + slide mapping ───────────────────────
-    _update_phase(job_id, "map", PhaseStatus.RUNNING.value)
+    #
+    # CRITICAL: Each question is processed in its own short DB session
+    # (micro-transaction) so the SQLite write lock is held for only
+    # milliseconds at a time.  The previous design opened ONE session
+    # for the entire loop; record_matches' flush() acquired the write
+    # lock early and held it until the loop finished — blocking every
+    # other DB writer (including the progress-update calls) for minutes.
+    #
+    _update_phase(job_id, "map", PhaseStatus.RUNNING.value,
+                  progress_detail="Building BM25 index")
 
     try:
-        total_matches = 0
+        # Build BM25 index in a short read-only session (closes immediately)
         with get_db() as session:
             bm25_index = BM25Index(session)
 
-            for q in question_list.questions:
-                matches = hybrid_search(
-                    query=q.question_text,
-                    session=session,
-                    embedder=embedder,
-                    chroma=chroma,
-                    bm25_index=bm25_index,
-                )
-                record_matches(session, q, matches, source_file=filename, subject=subject)
-                total_matches += len(matches)
+        total_matches = 0
+        n_questions = len(question_list.questions)
 
-            recompute_importance_scores(session)
+        for i, q in enumerate(question_list.questions, 1):
+            _update_progress(job_id, "map",
+                             int(i / n_questions * 90),
+                             f"Mapping question {i}/{n_questions}")
+
+            # One short transaction per question: search → record → commit
+            def _map_one(question=q):
+                with get_db() as sess:
+                    matches = hybrid_search(
+                        query=question.question_text,
+                        session=sess,
+                        embedder=embedder,
+                        chroma=chroma,
+                        bm25_index=bm25_index,
+                    )
+                    record_matches(sess, question, matches,
+                                   source_file=filename, subject=subject)
+                    return len(matches)
+
+            n = _safe_db_op(_map_one)
+            total_matches += n
+
+        # Final short transaction: recompute importance scores
+        def _recompute():
+            with get_db() as sess:
+                recompute_importance_scores(sess)
+        _safe_db_op(_recompute)
 
         _update_phase(job_id, "map", PhaseStatus.COMPLETED.value)
         _complete_job(job_id)
@@ -397,4 +503,126 @@ def process_pyq_task(self, filepath, job_id, subject=""):
     except Exception as e:
         log.error(f"[pyq] Phase 3 failed: {filename} — {e}", exc_info=True)
         _fail_job(job_id, "map", str(e))
+        raise
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Auto PYQ Re-map — triggered when new study material is indexed
+# ═════════════════════════════════════════════════════════════════════════
+
+def _trigger_pyq_remap(subject: str):
+    """
+    Check if PYQ questions exist for *subject*; if so, fire remap_pyq_task
+    so the newly indexed slides get matched against existing questions.
+    """
+    from indexing.models import PYQQuestion
+    with get_db() as session:
+        q_count = (
+            session.query(PYQQuestion)
+            .filter(PYQQuestion.subject == subject)
+            .count()
+        )
+    if q_count > 0:
+        log.info(f"[auto-remap] {q_count} PYQ questions exist for {subject} — scheduling re-map")
+        remap_pyq_task.apply_async(args=[subject])
+
+
+@app.task(bind=True, name="jobs.remap_pyq")
+def remap_pyq_task(self, subject):
+    """
+    Re-run hybrid search for ALL existing PYQ questions against the
+    current slide index for *subject*.  Updates similarity matches and
+    recomputes importance scores.
+
+    This fires automatically after new study material is indexed, so
+    PYQ scores stay up-to-date without user intervention.
+    """
+    _ensure_db()
+
+    from pyq.hybrid_search import hybrid_search
+    from pyq.mapper import record_matches, recompute_importance_scores
+    from pyq.bm25_search import BM25Index
+    from indexing.models import PYQQuestion, PYQMatch
+
+    embedder = _get_embedder()
+    chroma = _get_chroma()
+
+    log.info(f"[remap] Starting PYQ re-map for subject={subject}")
+
+    from pyq.schemas import ExtractedQuestion
+    from indexing.models import Slide
+
+    try:
+        # ── Step 1: Load questions (short read session) ──────────────
+        with get_db() as session:
+            questions = (
+                session.query(PYQQuestion)
+                .filter(PYQQuestion.subject == subject)
+                .all()
+            )
+            if not questions:
+                log.info(f"[remap] No PYQ questions for {subject} — nothing to do")
+                return {"subject": subject, "status": "no_questions"}
+
+            # Detach data we need so we can close the session
+            q_data = [
+                {"id": q.id, "text": q.question_text, "source": q.source_file or ""}
+                for q in questions
+            ]
+            q_ids = [d["id"] for d in q_data]
+
+        # ── Step 2: Clear old matches (short write session) ──────────
+        def _clear_old():
+            with get_db() as session:
+                session.query(PYQMatch).filter(PYQMatch.pyq_id.in_(q_ids)).delete(synchronize_session="fetch")
+                session.query(Slide).filter(Slide.subject == subject).update(
+                    {Slide.pyq_hit_count: 0, Slide.importance_score: 0.0},
+                    synchronize_session="fetch",
+                )
+        _safe_db_op(_clear_old)
+
+        # ── Step 3: Build BM25 index (short read session) ────────────
+        with get_db() as session:
+            bm25_index = BM25Index(session)
+
+        # ── Step 4: Map each question (micro-transaction per Q) ──────
+        total_matches = 0
+        for qd in q_data:
+            def _map_one(data=qd):
+                with get_db() as session:
+                    matches = hybrid_search(
+                        query=data["text"],
+                        session=session,
+                        embedder=embedder,
+                        chroma=chroma,
+                        bm25_index=bm25_index,
+                    )
+                    eq = ExtractedQuestion(
+                        question_number=0,
+                        question_text=data["text"],
+                        marks=None,
+                    )
+                    record_matches(session, eq, matches,
+                                   source_file=data["source"], subject=subject)
+                    return len(matches)
+
+            n = _safe_db_op(_map_one)
+            total_matches += n
+
+        # ── Step 5: Recompute scores (short write session) ───────────
+        def _recompute():
+            with get_db() as session:
+                recompute_importance_scores(session)
+        _safe_db_op(_recompute)
+
+        log.info(f"[remap] Done: {subject} — {len(q_data)} questions, {total_matches} matches")
+        return {
+            "subject": subject,
+            "status": "ok",
+            "questions": len(q_data),
+            "matches": total_matches,
+        }
+
+    except Exception as e:
+        log.error(f"[remap] Failed for {subject}: {e}", exc_info=True)
         raise
