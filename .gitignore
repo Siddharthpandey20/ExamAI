@@ -10,3 +10,7 @@ test_db_inspect.py
 rough.py
 migrate_to_subjects.py
 SYSTEM.md
+test_gemini.py
+test_routes.py
+test_db_concurrency.py
+test_comprehensive.py
