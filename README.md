@@ -38,22 +38,23 @@
 
 ## Table of Contents
 
+
 | # | Section |
 |---|---|
-| 1 | [What Is ExamPrep AI?](#1-what-is-examprep-ai) |
-| 2 | [Why Not Just Use ChatGPT?](#2-why-not-just-use-chatgpt) |
-| 3 | [Feature Showcase](#3-feature-showcase) |
-| 4 | [System Architecture](#4-system-architecture) |
-| 5 | [Concurrency & Performance Engineering](#5-concurrency--performance-engineering) |
-| 6 | [Multi-LLM Orchestration](#6-multi-llm-orchestration) |
-| 7 | [Tech Stack](#7-tech-stack) |
-| 8 | [Project Structure](#8-project-structure) |
-| 9 | [Getting Started](#9-getting-started) |
-| 10 | [Environment Variables](#10-environment-variables) |
-| 11 | [Ollama Setup (Required)](#11-ollama-setup-required) |
-| 12 | [Limitations & Honest Trade-offs](#12-limitations--honest-trade-offs) |
-| 13 | [Upcoming Deep-Dive Documentation](#13-upcoming-deep-dive-documentation) |
-| 14 | [License](#14-license) |
+| 1 | [What Is ExamPrep AI?](#1--what-is-examprep-ai) |
+| 2 | [Why Not Just Use ChatGPT?](#2--why-not-just-use-chatgpt) |
+| 3 | [Feature Showcase](#3--feature-showcase) |
+| 4 | [System Architecture](#system-architecture) |
+| 5 | [Concurrency & Performance Engineering](#5--concurrency--performance-engineering) |
+| 6 | [Multi-LLM Orchestration](#multi-llm) |
+| 7 | [Tech Stack](#tech-stack) |
+| 8 | [Project Structure](#8--project-structure) |
+| 9 | [Getting Started](#9--getting-started) |
+| 10 | [Environment Variables](#10--environment-variables) |
+| 11 | [Ollama Setup (Required)](#11--ollama-setup-required) |
+| 12 | [Limitations & Honest Trade-offs](#12--limitations--honest-trade-offs) |
+| 13 | [Deep-Dive Documentation](#13--deep-dive-documentation) |
+| 14 | [What Makes This Project Stand Out](#stand-out) |
 
 ---
 
@@ -367,8 +368,23 @@ Yes. And here's what it **cannot** do:
 - 📝 **Markdown rendering** — AI responses render with proper formatting (headings, lists, bold, tables)
 
 ---
+Gemini said
+That is frustrating, especially after you've spent so much time polishing the content. Markdown anchor links can be incredibly finicky because different platforms (GitHub, VS Code, Obsidian, etc.) use slightly different "slug" generators.
 
-## 4. 🏗️ System Architecture
+The most likely reason it’s still failing is the emojis and the punctuation inside your headings. When a heading is ## 4. 🔄 System Architecture, the parser often struggles to decide if the ID should include the dot or skip the emoji.
+
+The "Bulletproof" Solution
+Instead of guessing how the parser will handle the emojis, use HTML Anchors. This is the only way to guarantee they work everywhere.
+
+Step 1: Add the ID directly into your Headings
+Wrap the text of your headings in a <span> with an id. This won't change the look of the text at all, but it gives the link a "static" target.
+
+Change your headings to look like this:
+
+Markdown
+
+## <span id="system-architecture">4. 🔄 System Architecture</span>
+
 
 ### High-Level Architecture Diagram
 
@@ -715,7 +731,7 @@ def rrf_score(slide_id, rankings, K=60):
 
 ---
 
-## 6. 🤖 Multi-LLM Orchestration Strategy
+## <span id="multi-llm">6. 🤖 Multi-LLM Orchestration Strategy</span>
 
 > **This section showcases AI engineering:** agentic tool use, multi-model fallback chains, structured output parsing, and intelligent LLM routing.
 
@@ -896,7 +912,7 @@ ExamPrep AI uses **four distinct LLM configurations** across the pipeline, each 
 
 ---
 
-## 7. 🛠️ Tech Stack
+## <span id="tech-stack">7. 🛠️ Tech Stack</span>
 
 **Every technology choice is engineering-driven — no bloat, every component has a measurable performance impact.**
 
@@ -1392,7 +1408,7 @@ The following technical deep-dives are planned as separate markdown files:
 
 ---
 
-## 14. 🎖️ What Makes This Project Stand Out
+## <span id="stand-out">14. 🎖️ What Makes This Project Stand Out</span>
 
 ### AI Engineering Capabilities Demonstrated
 
