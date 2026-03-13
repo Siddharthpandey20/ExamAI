@@ -142,7 +142,7 @@ def get_subject(name: str, db: Session = Depends(get_db_dep)):
     doc_list = [
         {
             "id": d.id,
-            "filename": d.filename,
+            "filename": d.original_filename or d.filename,
             "status": d.status,
             "total_slides": d.total_slides,
             "core_topics": d.core_topics,

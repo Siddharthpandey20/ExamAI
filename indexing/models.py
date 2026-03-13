@@ -48,11 +48,12 @@ class Subject(Base):
 class Document(Base):
     __tablename__ = "documents"
 
-    id           = Column(Integer, primary_key=True, autoincrement=True)
-    filename     = Column(String, nullable=False)
-    file_hash    = Column(String, nullable=False, unique=True, index=True)
-    processed_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
-    status       = Column(String, nullable=False, default="pending")
+    id                = Column(Integer, primary_key=True, autoincrement=True)
+    filename          = Column(String, nullable=False)          # internal .md filename
+    original_filename = Column(String, nullable=True)           # user-facing pdf/pptx filename
+    file_hash         = Column(String, nullable=False, unique=True, index=True)
+    processed_at      = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    status            = Column(String, nullable=False, default="pending")
 
     # User-assigned subject (matches subjects.name)
     subject      = Column(String, index=True)

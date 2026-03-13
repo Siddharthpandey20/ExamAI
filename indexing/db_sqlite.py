@@ -50,10 +50,12 @@ def insert_document(
     core_topics: str = "",
     chapters_json: str = "",
     total_slides: int = 0,
+    original_filename: str = "",
 ) -> Document:
     """Insert a new document record with metadata. Returns the ORM object."""
     doc = Document(
         filename=filename,
+        original_filename=original_filename or None,
         file_hash=file_hash,
         processed_at=datetime.now(timezone.utc),
         status="processed",

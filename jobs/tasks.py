@@ -471,6 +471,7 @@ def process_pyq_task(self, filepath, job_id, subject=""):
                         embedder=embedder,
                         chroma=chroma,
                         bm25_index=bm25_index,
+                        subject=subject,
                     )
                     record_matches(sess, question, matches,
                                    source_file=filename, subject=subject)
@@ -575,10 +576,10 @@ def remap_pyq_task(self, subject):
         def _clear_old():
             with get_db() as session:
                 session.query(PYQMatch).filter(PYQMatch.pyq_id.in_(q_ids)).delete(synchronize_session="fetch")
-                session.query(Slide).filter(Slide.subject == subject).update(
-                    {Slide.pyq_hit_count: 0, Slide.importance_score: 0.0},
-                    synchronize_session="fetch",
-                )
+                # pyq_hit_count and importance_score are recomputed from
+                # pyq_matches at the end (step 5), so no need to zero them
+                # here.  Zeroing was incorrect because cross-subject matches
+                # on these slides would be lost.
         _safe_db_op(_clear_old)
 
         # ── Step 3: Build BM25 index (short read session) ────────────
@@ -596,6 +597,7 @@ def remap_pyq_task(self, subject):
                         embedder=embedder,
                         chroma=chroma,
                         bm25_index=bm25_index,
+                        subject=subject,
                     )
                     eq = ExtractedQuestion(
                         question_number=0,

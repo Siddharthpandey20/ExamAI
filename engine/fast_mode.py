@@ -125,6 +125,7 @@ async def fast_search(query: str, subject: str, force: bool = False) -> dict:
                         "page_number": s["page_number"],
                         "filename": s["filename"],
                         "chapter": s["chapter"],
+                        "summary": s["summary"],
                         "slide_type": s["slide_type"],
                         "importance_score": s["importance_score"],
                         "pyq_hit_count": s["pyq_hit_count"],
@@ -212,8 +213,9 @@ async def fast_coverage(topic: str, subject: str, force: bool = False) -> dict:
                         "slide_id": s["slide_id"],
                         "page_number": s["page_number"],
                         "filename": s["filename"],
+                        "summary": s["summary"],
                         "chapter": s["chapter"],
-                        "rrf_score": s.get("rrf_score", 0),
+                        "importance_score": s.get("rrf_score", 0),
                     }
                     for s in slides[:6]
                 ],

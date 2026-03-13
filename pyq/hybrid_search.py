@@ -40,6 +40,7 @@ def _dense_search(
     embedder: Embedder,
     chroma: ChromaStore,
     top_n: int = DENSE_TOP_N,
+    subject: str | None = None,
 ) -> list[dict]:
     """
     Run dense (vector) search via ChromaDB.
@@ -48,7 +49,8 @@ def _dense_search(
     where slide_id_key is "doc{doc_id}_page{page_number}" for matching.
     """
     query_embedding = embedder.embed_query(query)
-    results = chroma.query(query_embedding=query_embedding, n_results=top_n)
+    where = {"subject": subject} if subject else None
+    results = chroma.query(query_embedding=query_embedding, n_results=top_n, where=where)
 
     ranked = []
     if results and results["ids"] and results["ids"][0]:
@@ -71,13 +73,14 @@ def _sparse_search(
     query: str,
     bm25_index: BM25Index,
     top_n: int = SPARSE_TOP_N,
+    subject: str | None = None,
 ) -> list[dict]:
     """
     Run sparse (BM25) search.
 
     Returns list of dicts with: slide_id, slide_id_key, doc_id, page_number, source_file, rank
     """
-    bm25_results = bm25_index.search(query, top_n=top_n)
+    bm25_results = bm25_index.search(query, top_n=top_n, subject=subject)
 
     ranked = []
     for rank, r in enumerate(bm25_results, start=1):
@@ -168,6 +171,7 @@ def hybrid_search(
     bm25_index: BM25Index,
     top_k: int = RRF_TOP_K,
     threshold: float = RRF_SCORE_THRESHOLD,
+    subject: str | None = None,
 ) -> list[RRFResult]:
     """
     Run hybrid search (dense + sparse + RRF fusion) for a single question.
@@ -188,6 +192,8 @@ def hybrid_search(
         Only return top K results after RRF sorting.
     threshold : float
         Minimum RRF score to count as a match.
+    subject : str or None
+        If provided, restrict results to this subject only.
 
     Returns
     -------
@@ -195,11 +201,11 @@ def hybrid_search(
         Matched slides with RRF scores, filtered by top_k and threshold.
     """
     # Step 1: Dense search (ChromaDB)
-    dense_results = _dense_search(query, embedder, chroma)
+    dense_results = _dense_search(query, embedder, chroma, subject=subject)
     log.debug(f"[Hybrid] Dense search returned {len(dense_results)} results")
 
     # Step 2: Sparse search (BM25)
-    sparse_results = _sparse_search(query, bm25_index)
+    sparse_results = _sparse_search(query, bm25_index, subject=subject)
     log.debug(f"[Hybrid] Sparse search returned {len(sparse_results)} results")
 
     # Step 3: RRF fusion

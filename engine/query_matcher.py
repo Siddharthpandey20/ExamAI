@@ -87,7 +87,7 @@ CRITICAL RULES — read carefully:
 - When in doubt, return is_existing=false.  False negatives are acceptable; \
   false positives are NOT.
 - A match must share the SAME core subject matter, not just be vaguely related.
-
+-For matching optimised revision schedule you make sure the current given hour matches the hour of the last revision of the same topic. If it does, then you return a match, otherwise no match.It is very important to strictly follow this rule to ensure the effectiveness of the revision schedule.
 Examples of MATCHES (same topic, different wording):
   "is tcp covered in ppt?" ↔ "tcp is covered in ppt or not"  → MATCH
   "explain tcp"           ↔ "what is tcp"                    → MATCH

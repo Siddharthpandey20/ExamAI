@@ -62,6 +62,24 @@ def _infer_subject_from_path(filepath: str) -> str:
     return ""
 
 
+def _find_original_file(md_filepath: str, subject: str) -> str:
+    """
+    Find the original uploaded file (pdf/pptx) that corresponds to this md.
+
+    Looks for a file with the same stem in data/{subject}/uploads/.
+    Returns the original filename (e.g., 'lecture.pdf') or empty string if not found.
+    """
+    from indexing.config import get_subject_dirs
+    stem = os.path.splitext(os.path.basename(md_filepath))[0]
+    if subject:
+        uploads_dir = get_subject_dirs(subject)["uploads"]
+        for ext in (".pdf", ".pptx", ".ppt"):
+            candidate = os.path.join(uploads_dir, stem + ext)
+            if os.path.isfile(candidate):
+                return stem + ext
+    return ""
+
+
 def index_file(
     filepath: str,
     session: Session,
@@ -138,6 +156,11 @@ def index_file(
         else:
             log.warning(f"[Pipeline] Subject '{subject_name}' not found in subjects table")
 
+    # Find original uploaded file (pdf/pptx) for user-facing display
+    original_filename = _find_original_file(filepath, subject_name)
+    if original_filename:
+        log.info(f"[Pipeline] Original file: '{original_filename}' for '{filename}'")
+
     existing = get_document_by_hash(session, file_hash)
     if existing:
         doc_id = existing.id
@@ -149,6 +172,8 @@ def index_file(
         existing.core_topics = core_topics_str
         existing.chapters_json = chapters_json
         existing.total_slides = len(slides)
+        if original_filename and not existing.original_filename:
+            existing.original_filename = original_filename
     else:
         chroma.delete_by_source(filename)
         doc = insert_document(
@@ -160,6 +185,7 @@ def index_file(
             core_topics=core_topics_str,
             chapters_json=chapters_json,
             total_slides=len(slides),
+            original_filename=original_filename,
         )
         doc_id = doc.id
 

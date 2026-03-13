@@ -120,16 +120,34 @@ def record_matches(
 
 def recompute_importance_scores(session: Session) -> int:
     """
-    Recompute importance_score for ALL slides based on current pyq_hit_counts.
+    Recompute pyq_hit_count AND importance_score for ALL embedded slides.
+
+    pyq_hit_count is derived from the actual pyq_matches table (COUNT of
+    matches per slide), making it the single source of truth.  This avoids
+    drift caused by failed increments, blanket resets, or cross-subject
+    remapping.
 
     Returns the number of slides updated.
     """
+    from sqlalchemy import func
+
     all_slides = session.query(Slide).filter(Slide.is_embedded == True).all()
 
     if not all_slides:
         return 0
 
-    # Find max pyq_hit_count for normalization
+    # Derive hit counts from the matches table (source of truth)
+    hit_counts = dict(
+        session.query(PYQMatch.slide_id, func.count(PYQMatch.pyq_id))
+        .group_by(PYQMatch.slide_id)
+        .all()
+    )
+
+    # Apply derived counts to slides
+    for slide in all_slides:
+        slide.pyq_hit_count = hit_counts.get(slide.id, 0)
+
+    # Find max for normalization (after updating counts)
     max_hits = max((s.pyq_hit_count or 0) for s in all_slides)
 
     updated = 0

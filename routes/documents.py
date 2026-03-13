@@ -100,7 +100,7 @@ def list_documents(subject: str, db: Session = Depends(get_db_dep)):
 
         result.append({
             "id": doc.id,
-            "filename": doc.filename,
+            "filename": doc.original_filename or doc.filename,
             "status": doc.status,
             "subject": doc.subject,
             "ai_subject": doc.ai_subject,
@@ -162,7 +162,7 @@ def document_detail(
 
     return {
         "id": doc.id,
-        "filename": doc.filename,
+        "filename": doc.original_filename or doc.filename,
         "status": doc.status,
         "subject": doc.subject,
         "ai_subject": doc.ai_subject,
@@ -222,7 +222,7 @@ def document_concepts(
     return {
         "subject": subject,
         "doc_id": doc.id,
-        "filename": doc.filename,
+        "filename": doc.original_filename or doc.filename,
         "total": len(sorted_concepts),
         "concepts": [
             {
@@ -257,10 +257,9 @@ def document_pyq_matches(
         return {
             "subject": subject,
             "doc_id": doc.id,
-            "filename": doc.filename,
-            "total_questions": 0,
-            "questions": [],
+            "filename": doc.original_filename or doc.filename,
         }
+
 
     # Find PYQ matches that hit this document's slides
     matches = (
@@ -296,7 +295,7 @@ def document_pyq_matches(
     return {
         "subject": subject,
         "doc_id": doc.id,
-        "filename": doc.filename,
+        "filename": doc.original_filename or doc.filename,
         "total_questions": len(questions),
         "total_matches": sum(len(q["matched_slides"]) for q in questions),
         "questions": questions,
@@ -377,7 +376,7 @@ def document_priorities(
     return {
         "subject": subject,
         "doc_id": doc.id,
-        "filename": doc.filename,
+        "filename": doc.original_filename or doc.filename,
         "high": high,
         "medium": medium,
         "low": low,
@@ -456,7 +455,7 @@ def document_summary(
     return {
         "subject": subject,
         "doc_id": doc.id,
-        "filename": doc.filename,
+        "filename": doc.original_filename or doc.filename,
         "overview": doc.summary or "",
         "core_topics": doc.core_topics or "",
         "total_slides": len(slides),

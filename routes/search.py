@@ -110,20 +110,6 @@ async def topic_coverage(
         return await fast_coverage(body.topic, subject, force=force)
 
 
-# @router.get("/slides/test")
-# def test_db(db: Session = Depends(get_db_dep)):
-#     subject = "CA"
-#     is_embedded = True
-
-#     # count slides with filters
-#     count = db.query(Slide).filter(
-#         Slide.subject == subject,
-#         Slide.is_embedded == is_embedded
-#     ).count()
-
-#     print("Slides count:", count)
-#     return {"slides_count": count}
-
 @router.get("/slides/{subject}")
 def filter_slides(
     subject: str,
@@ -172,7 +158,7 @@ def filter_slides(
             "slide_id": sl.id,
             "doc_id": sl.doc_id,
             "page_number": sl.page_number,
-            "filename": doc.filename if doc else "",
+            "filename": (doc.original_filename or doc.filename) if doc else "",
             "slide_type": sl.slide_type,
             "chapter": sl.chapter,
             "concepts": sl.concepts,
@@ -229,7 +215,9 @@ def browse_concepts(
                 "slide_id": sl.id,
                 "doc_id": sl.doc_id,
                 "page_number": sl.page_number,
-                "filename": doc.filename if doc else "",
+                "summary": sl.summary,
+                "pyq_hit_count": sl.pyq_hit_count,
+                "filename": (doc.original_filename or doc.filename) if doc else "",
             })
 
     sorted_concepts = sorted(freq.items(), key=lambda x: x[1], reverse=True)

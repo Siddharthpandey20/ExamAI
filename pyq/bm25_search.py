@@ -82,6 +82,7 @@ class BM25Index:
                 "doc_id": slide.doc_id,
                 "page_number": slide.page_number,
                 "source_file": slide.document.filename if slide.document else "",
+                "subject": slide.subject or "",
             }
             self._index_order.append(slide.id)
             corpus.append(tokens)
@@ -94,7 +95,7 @@ class BM25Index:
         self._bm25 = BM25Okapi(corpus)
         log.info(f"[BM25] Index built: {len(corpus)} slides indexed")
 
-    def search(self, query: str, top_n: int = 20) -> list[dict]:
+    def search(self, query: str, top_n: int = 20, subject: str | None = None) -> list[dict]:
         """
         Search the BM25 index with a query string.
 
@@ -104,6 +105,8 @@ class BM25Index:
             The question text to search for.
         top_n : int
             Number of top results to return.
+        subject : str or None
+            If provided, only return slides belonging to this subject.
 
         Returns
         -------
@@ -125,6 +128,7 @@ class BM25Index:
             (self._index_order[i], scores[i])
             for i in range(len(scores))
             if scores[i] > 0
+            and (subject is None or self._slide_data[self._index_order[i]].get("subject") == subject)
         ]
         scored.sort(key=lambda x: x[1], reverse=True)
 
