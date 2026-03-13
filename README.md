@@ -175,7 +175,12 @@ Yes. And here's what it **cannot** do:
   </figcaption>
 </figure>
 
-![Real-time Pipeline Progress](https://via.placeholder.com/800x400?text=Real-time+SSE+Pipeline+Progress)
+<figure>
+  <img src="./screenshots/Jobs_running.png">
+  <figcaption style="text-align: center; font-weight: bold;">
+    Real Time Upload Status 
+  </figcaption>
+</figure>
 
 ---
 
