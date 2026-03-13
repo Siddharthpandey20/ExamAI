@@ -23,7 +23,7 @@ PREVIEW_CHAR_LIMIT = 6000
 
 # ── Chunked overview settings ────────────────────────────────────────────
 # Slides per chunk for the two-stage overview (Stage 1: local overviews)
-OVERVIEW_CHUNK_SIZE = 35
+OVERVIEW_CHUNK_SIZE = 25
 # Max concurrent Ollama calls (keep low to avoid overloading local model)
 OLLAMA_MAX_CONCURRENCY = 3
 
