@@ -119,7 +119,10 @@ class PYQMatch(Base):
     __tablename__ = "pyq_matches"
 
     pyq_id           = Column(Integer, ForeignKey("pyq_questions.id"), primary_key=True)
-    slide_id         = Column(Integer, ForeignKey("slides.id"), primary_key=True)
+    # index=True: the composite PK's implicit index is ordered (pyq_id, slide_id),
+    # so it cannot serve the slide-first lookups in routes/documents.py and
+    # mapper.recompute_importance_scores.
+    slide_id         = Column(Integer, ForeignKey("slides.id"), primary_key=True, index=True)
     similarity_score = Column(Float, nullable=False)
 
     question = relationship("PYQQuestion", back_populates="matches")

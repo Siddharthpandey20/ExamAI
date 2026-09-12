@@ -131,6 +131,28 @@ def _safe_alter(eng, sql):
             pass
 
 
+def _ensure_declared_indexes(eng):
+    """Create any index that a model declares but the database is missing.
+
+    create_all() only builds indexes at the moment it creates a table, so a
+    column added later via ALTER TABLE never gets its declared index — which
+    is how slides.subject, documents.subject, documents.subject_id,
+    pyq_questions.subject and jobs.subject ended up unindexed despite being
+    declared index=True.
+
+    Driven entirely off the ORM metadata so there is one source of truth.
+    checkfirst=True makes this a no-op for indexes that already exist, so it
+    is safe to run on every startup and can never create a duplicate.
+    """
+    for table in Base.metadata.tables.values():
+        for index in table.indexes:
+            try:
+                index.create(bind=eng, checkfirst=True)
+            except Exception:
+                # Never let index creation block startup.
+                log.debug(f"[Database] Could not ensure index '{index.name}'", exc_info=True)
+
+
 def init_db():
     """Create all tables if they don't exist yet."""
     Base.metadata.create_all(bind=engine)
@@ -150,5 +172,9 @@ def init_db():
     # Dev migration: ensure job_phases has progress columns
     _safe_alter(engine, "ALTER TABLE job_phases ADD COLUMN progress_pct INTEGER DEFAULT 0")
     _safe_alter(engine, "ALTER TABLE job_phases ADD COLUMN progress_detail TEXT")
+
+    # Backfill indexes that were declared on the models but never created
+    # because their columns were added to existing tables.
+    _ensure_declared_indexes(engine)
 
     log.info(f"[Database] Tables ensured at {SQLITE_DB_URL}")
