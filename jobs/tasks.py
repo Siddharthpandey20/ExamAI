@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from jobs.celery_app import app
 from jobs.models import (
     Job, JobPhase,
-    JobStatus, PhaseStatus,
+    JobStatus, PhaseStatus, JobType,
 )
 from indexing.database import get_db, init_db
 
@@ -400,20 +400,67 @@ def process_pyq_task(self, filepath, job_id, subject=""):
         _complete_job(job_id)
         return {"filename": filename, "status": "skipped", "questions": 0, "matches": 0}
 
-    # Guard 1: JSON tracker (fast pre-filter)
-    if is_processed(filepath):
-        return _skip_already_ingested("already in tracker")
-
-    # Guard 2: SQLite (authoritative — survives a lost tracker file)
-    def _already_in_db():
+    def _stored_question_count():
+        """0 when nothing is ingested, else how many questions are stored."""
+        from indexing.models import PYQQuestion
         with get_db() as session:
-            # Scoped by subject so the same paper filename under a different
+            # is_pyq_already_ingested stays the authoritative predicate; it is
+            # scoped by subject so the same paper filename under a different
             # subject is not mistaken for a duplicate.
-            return is_pyq_already_ingested(session, filename, subject=subject)
+            if not is_pyq_already_ingested(session, filename, subject=subject):
+                return 0
+            return (
+                session.query(PYQQuestion)
+                .filter(PYQQuestion.source_file == filename,
+                        PYQQuestion.subject == subject)
+                .count()
+            )
 
-    if _safe_db_op(_already_in_db):
-        mark_processed(filepath, 0, 0)  # sync tracker to match DB
-        return _skip_already_ingested("already in database")
+    def _has_completed_job():
+        with get_db() as session:
+            return (
+                session.query(Job)
+                .filter(Job.job_type == JobType.PYQ.value,
+                        Job.filename == filename,
+                        Job.subject == subject,
+                        Job.status == JobStatus.COMPLETED.value,
+                        Job.id != job_id)
+                .count() > 0
+            )
+
+    # Completion must be PROVEN, not inferred from "some rows exist".  Phase 3
+    # commits one question at a time, so a crash mid-loop leaves rows behind
+    # without the paper being finished.  Two independent proofs, either
+    # sufficient:
+    #   - the JSON tracker, written only after a full successful run (here and
+    #     in pyq/pipeline.py, both as the very last step);
+    #   - a completed Celery job for the same paper, which survives a lost or
+    #     deleted tracker file.
+    verified_complete = is_processed(filepath) or bool(_safe_db_op(_has_completed_job))
+
+    if verified_complete:
+        if not is_processed(filepath):
+            mark_processed(filepath, 0, 0)  # heal a lost tracker; run is proven done
+        return _skip_already_ingested("already processed")
+
+    stored = _safe_db_op(_stored_question_count)
+    if stored:
+        # Rows exist but nothing proves the run finished — this is a partial
+        # ingestion from an earlier crash.  Reprocessing would duplicate the
+        # questions already stored, so we stop; but we must NOT report success,
+        # and must NOT write the tracker, because either would seal the paper
+        # in a permanently half-ingested state.
+        msg = (
+            f"'{filename}' is partially ingested: {stored} question(s) are already "
+            f"stored for {subject or 'this subject'} from an earlier run that did not "
+            "finish. Reprocessing now would duplicate them, so this job has been "
+            "stopped rather than silently reporting success. The existing rows have "
+            "been left untouched — removing them is a manual step."
+        )
+        log.error(f"[pyq] {msg}")
+        _fail_job(job_id, "ingest_pyq", msg)
+        return {"filename": filename, "status": "partial_ingestion",
+                "questions": stored, "matches": 0}
 
     # ── Phase 1: Text extraction (OCR) ───────────────────────────────
     _update_phase(job_id, "ingest_pyq", PhaseStatus.RUNNING.value, task_id=self.request.id,
