@@ -194,7 +194,16 @@ def run_hybrid_search(
         d["sparse_rank"] = s_rank
         fused.append(d)
 
-    fused.sort(key=lambda x: x["rrf_score"], reverse=True)
+    # Deterministic tie-break.  `all_keys` above is a set, so the order in
+    # which equal-scoring candidates were appended depends on PYTHONHASHSEED,
+    # and a stable sort preserves that order — which made the tail of the
+    # result vary between processes for the same query.  RRF ties are
+    # structural, not a rounding artifact: an item found only by dense at
+    # rank i scores exactly the same as one found only by sparse at rank i.
+    # Ordering by (doc_id, page_number) within a tie is stable and follows
+    # document order.  Non-tied ordering is unchanged: -rrf_score ascending
+    # is identical to rrf_score descending.
+    fused.sort(key=lambda x: (-x["rrf_score"], x["doc_id"], x["page_number"]))
     return fused[:top_k]
 
 

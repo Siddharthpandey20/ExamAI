@@ -159,7 +159,11 @@ def _compute_rrf(
             sparse_rank=s_rank,
         ))
 
-    rrf_results.sort(key=lambda r: r.rrf_score, reverse=True)
+    # Deterministic tie-break — see engine/tools.py.  `all_keys` is a set, so
+    # equal-scoring candidates were ordered by PYTHONHASHSEED.  This path
+    # persists its output as PYQMatch rows, so a tie straddling RRF_TOP_K
+    # would change stored data between runs.
+    rrf_results.sort(key=lambda r: (-r.rrf_score, r.doc_id, r.page_number))
     return rrf_results
 
 
