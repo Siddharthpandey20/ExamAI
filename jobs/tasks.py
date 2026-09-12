@@ -377,13 +377,43 @@ def process_pyq_task(self, filepath, job_id, subject=""):
     from pyq.ingestion_helper import extract_pyq_text
     from pyq.extractor import extract_questions
     from pyq.hybrid_search import hybrid_search
-    from pyq.mapper import record_matches, recompute_importance_scores
+    from pyq.mapper import (
+        record_matches, recompute_importance_scores, is_pyq_already_ingested,
+    )
     from pyq.tracker import is_processed, mark_processed
     from pyq.bm25_search import BM25Index
 
     filename = os.path.basename(filepath)
     embedder = _get_embedder()
     chroma = _get_chroma()
+
+    # ── Duplicate guards (mirrors pyq/pipeline.py) ───────────────────
+    # This task inserts a question row per extracted question with no
+    # uniqueness constraint, so a re-upload, a Celery retry or an acks_late
+    # re-delivery would insert the whole paper again.  Duplicated questions
+    # inflate pyq_hit_count, which feeds importance_score and therefore the
+    # priority tiers, study plans and revision schedules.
+    def _skip_already_ingested(reason: str):
+        log.info(f"[pyq] '{filename}' {reason} -> skipped")
+        for phase in ("ingest_pyq", "extract", "map"):
+            _update_phase(job_id, phase, PhaseStatus.SKIPPED.value)
+        _complete_job(job_id)
+        return {"filename": filename, "status": "skipped", "questions": 0, "matches": 0}
+
+    # Guard 1: JSON tracker (fast pre-filter)
+    if is_processed(filepath):
+        return _skip_already_ingested("already in tracker")
+
+    # Guard 2: SQLite (authoritative — survives a lost tracker file)
+    def _already_in_db():
+        with get_db() as session:
+            # Scoped by subject so the same paper filename under a different
+            # subject is not mistaken for a duplicate.
+            return is_pyq_already_ingested(session, filename, subject=subject)
+
+    if _safe_db_op(_already_in_db):
+        mark_processed(filepath, 0, 0)  # sync tracker to match DB
+        return _skip_already_ingested("already in database")
 
     # ── Phase 1: Text extraction (OCR) ───────────────────────────────
     _update_phase(job_id, "ingest_pyq", PhaseStatus.RUNNING.value, task_id=self.request.id,
@@ -604,8 +634,13 @@ def remap_pyq_task(self, subject):
                         question_text=data["text"],
                         marks=None,
                     )
+                    # Re-attach to the question already in the database.
+                    # Without existing_pyq_id this inserts a fresh row, so
+                    # every re-map duplicated the subject's whole question
+                    # set and orphaned the previous generation.
                     record_matches(session, eq, matches,
-                                   source_file=data["source"], subject=subject)
+                                   source_file=data["source"], subject=subject,
+                                   existing_pyq_id=data["id"])
                     return len(matches)
 
             n = _safe_db_op(_map_one)

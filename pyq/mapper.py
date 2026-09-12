@@ -59,6 +59,7 @@ def record_matches(
     matches: list[RRFResult],
     source_file: str,
     subject: str = "",
+    existing_pyq_id: int | None = None,
 ) -> PYQQuestion | None:
     """
     Record a single question and its matched slides in SQLite.
@@ -75,24 +76,42 @@ def record_matches(
         Source PYQ filename for tracking.
     subject : str
         User-assigned subject name.
+    existing_pyq_id : int or None
+        Re-attach matches to this already-stored question instead of
+        inserting a new row.  Used by the re-map path, which re-scores
+        questions that are already in the database — inserting there would
+        duplicate the whole question set on every re-map.
+        None (the default) keeps the original insert behaviour.
 
     Returns
     -------
     PYQQuestion or None
-        The inserted question record, or None if no matches.
+        The question record the matches were attached to, or None if there
+        were no matches (or *existing_pyq_id* no longer exists).
     """
     if not matches:
         log.info(f"  Q{question.question_number}: No matches — skipping DB insert")
         return None
 
-    # Insert the question
-    pyq_q = PYQQuestion(
-        question_text=question.question_text,
-        source_file=source_file,
-        subject=subject,
-    )
-    session.add(pyq_q)
-    session.flush()  # get pyq_q.id
+    if existing_pyq_id is not None:
+        # Re-map: reuse the stored question so its id, text and source stay put.
+        pyq_q = (
+            session.query(PYQQuestion)
+            .filter(PYQQuestion.id == existing_pyq_id)
+            .first()
+        )
+        if pyq_q is None:
+            log.warning(f"  PYQ id={existing_pyq_id} vanished — skipping re-map for it")
+            return None
+    else:
+        # Insert the question
+        pyq_q = PYQQuestion(
+            question_text=question.question_text,
+            source_file=source_file,
+            subject=subject,
+        )
+        session.add(pyq_q)
+        session.flush()  # get pyq_q.id
 
     # Insert match records and increment hit counts
     for match in matches:
@@ -162,16 +181,20 @@ def recompute_importance_scores(session: Session) -> int:
     return updated
 
 
-def is_pyq_already_ingested(session: Session, source_file: str) -> bool:
+def is_pyq_already_ingested(
+    session: Session, source_file: str, subject: str | None = None,
+) -> bool:
     """
     Check if a PYQ source file already has questions in SQLite.
 
     This is the authoritative duplicate check — the JSON tracker is a
     convenience cache, but SQLite is the source of truth.
+
+    Pass *subject* to scope the check to one subject, so the same paper
+    filename uploaded under two different subjects is not mistaken for a
+    duplicate.  Omitting it keeps the original filename-only behaviour.
     """
-    count = (
-        session.query(PYQQuestion)
-        .filter(PYQQuestion.source_file == source_file)
-        .count()
-    )
-    return count > 0
+    q = session.query(PYQQuestion).filter(PYQQuestion.source_file == source_file)
+    if subject:
+        q = q.filter(PYQQuestion.subject == subject)
+    return q.count() > 0
