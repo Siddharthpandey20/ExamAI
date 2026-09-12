@@ -226,6 +226,8 @@ async def run_reasoning(query: str, subject: str, force: bool = False) -> dict:
     """
     with custom_span("reasoning_agent"):
         # ── Two-level cache (exact → fuzzy) ──────────────────────────
+        # Keep what the user typed: L1 hashes the raw text on the next ask.
+        raw_query = query
         cached, query = await smart_cache_check(
             subject, "reasoning", query, force,
         )
@@ -250,5 +252,6 @@ async def run_reasoning(query: str, subject: str, force: bool = False) -> dict:
             "mode": "reasoning",
             "model_used": model_name,
         }
-        store_cache(subject, "reasoning", query, response, model_name)
+        store_cache(subject, "reasoning", query, response, model_name,
+                    cache_key_query=raw_query)
         return response

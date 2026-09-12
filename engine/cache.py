@@ -152,13 +152,23 @@ def store_cache(
     query: str,
     response: dict,
     model_used: str = "",
+    cache_key_query: str | None = None,
 ):
     """
     Store an LLM response in the cache with the current content fingerprint.
 
     If an entry with the same hash already exists, it is replaced.
+
+    *cache_key_query* decouples the L1 lookup key from the text kept for L2.
+    Level 2 hands back a normalised rewrite of the user's question, and the
+    caller uses that for retrieval and the prompt — but Level 1 hashes
+    whatever the user actually typed, so keying on the normalised form meant
+    the very same question asked twice never hit L1 and paid for another
+    fuzzy-match round trip.  Passing the raw question here keys the row the
+    way L1 will look it up, while query_text stays normalised so L2 keeps
+    comparing against clean text.
     """
-    qhash = _make_hash(subject, endpoint, query)
+    qhash = _make_hash(subject, endpoint, cache_key_query if cache_key_query is not None else query)
     session = SessionFactory()
     try:
         fp = _content_fingerprint(subject, session)

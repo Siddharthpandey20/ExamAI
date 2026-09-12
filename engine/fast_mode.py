@@ -86,6 +86,8 @@ async def fast_search(query: str, subject: str, force: bool = False) -> dict:
     """Hybrid search → LLM-formatted answer + slide references."""
     with custom_span("fast_search"):
         # ── Two-level cache (exact → fuzzy) ──────────────────────────
+        # Keep what the user typed: L1 hashes the raw text on the next ask.
+        raw_query = query
         cached, query = await smart_cache_check(subject, "search", query, force)
         if cached:
             return cached
@@ -136,7 +138,8 @@ async def fast_search(query: str, subject: str, force: bool = False) -> dict:
                 "mode": "fast",
                 "model_used": model_used,
             }
-            store_cache(subject, "search", query, result, model_used)
+            store_cache(subject, "search", query, result, model_used,
+                        cache_key_query=raw_query)
             return result
         finally:
             session.close()
@@ -163,6 +166,8 @@ RULES:
 async def fast_coverage(topic: str, subject: str, force: bool = False) -> dict:
     """Check whether *topic* is covered in the student's slides."""
     with custom_span("fast_coverage"):
+        # Keep what the user typed: L1 hashes the raw text on the next ask.
+        raw_topic = topic
         cached, topic = await smart_cache_check(subject, "coverage", topic, force)
         if cached:
             return cached
@@ -221,7 +226,8 @@ async def fast_coverage(topic: str, subject: str, force: bool = False) -> dict:
                 ],
                 "model_used": model_used,
             }
-            store_cache(subject, "coverage", topic, result, model_used)
+            store_cache(subject, "coverage", topic, result, model_used,
+                        cache_key_query=raw_topic)
             return result
         finally:
             session.close()
