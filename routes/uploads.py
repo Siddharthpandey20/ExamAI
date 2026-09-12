@@ -33,6 +33,42 @@ def _validate_file(file: UploadFile):
         )
 
 
+def safe_upload_path(target_dir: str, raw_filename: str) -> tuple[str, str]:
+    """Resolve *raw_filename* to a path guaranteed to sit inside *target_dir*.
+
+    The multipart filename is attacker-controlled and Starlette does not
+    sanitise it, so joining it directly would let '../..' escape the subject
+    directory.  For an ordinary filename this is an identity transform — the
+    stored name must keep matching the markdown stem that indexing uses to
+    find the original upload.
+
+    Returns (safe_filename, absolute_save_path).
+    """
+    # Strip any directory component using both separators, so behaviour is
+    # identical whether the server runs on Windows or POSIX.
+    name = (raw_filename or "").replace("\\", "/").split("/")[-1]
+    # Drop control characters, then leading dots/spaces so '..' and friends
+    # cannot survive as a name of their own.
+    name = "".join(ch for ch in name if ch.isprintable()).lstrip(". ").strip()
+    if not name:
+        name = "upload"
+
+    save_path = os.path.join(target_dir, name)
+
+    # Defence in depth: never trust the string, check the resolved path.
+    resolved = os.path.realpath(save_path)
+    resolved_dir = os.path.realpath(target_dir)
+    try:
+        inside = os.path.commonpath([resolved, resolved_dir]) == resolved_dir
+    except ValueError:
+        # Different drives on Windows — definitively outside.
+        inside = False
+    if not inside or os.path.dirname(resolved) != resolved_dir:
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    return name, resolved
+
+
 def _resolve_subject(subject: str, db: Session) -> str:
     """
     Resolve subject name: must already exist in DB.
@@ -70,9 +106,8 @@ async def upload_study_material(
     subject_name = _resolve_subject(subject, db)
     ensure_subject_dirs(subject_name)
 
-    filename = file.filename or "upload"
     dirs = get_subject_dirs(subject_name)
-    save_path = os.path.join(dirs["uploads"], filename)
+    filename, save_path = safe_upload_path(dirs["uploads"], file.filename)
 
     # Save uploaded file to disk
     content = await file.read()
@@ -127,9 +162,8 @@ async def upload_pyq(
                    "Upload and process study material before uploading PYQ papers.",
         )
 
-    filename = file.filename or "upload"
     dirs = get_subject_dirs(subject_name)
-    save_path = os.path.join(dirs["pyq_uploads"], filename)
+    filename, save_path = safe_upload_path(dirs["pyq_uploads"], file.filename)
 
     # Save uploaded file to disk
     content = await file.read()
