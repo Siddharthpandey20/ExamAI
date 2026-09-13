@@ -634,7 +634,7 @@ The main AI-powered search. Student types a question and gets an answer with sli
     }
   ],
   "mode": "fast",
-  "model_used": "llama-3.3-70b-versatile"
+  "model_used": "openai/gpt-oss-120b"
 }
 ```
 
@@ -683,7 +683,7 @@ Check whether a topic is in the student's slides. Answers YES / NO / PARTIALLY w
       "rrf_score": 0.0421
     }
   ],
-  "model_used": "llama-3.3-70b-versatile"
+  "model_used": "openai/gpt-oss-120b"
 }
 ```
 
@@ -832,7 +832,7 @@ Generate an AI-written, priority-ranked study plan.
     "pyq_questions": 45
   },
   "mode": "fast",
-  "model_used": "llama-3.3-70b-versatile"
+  "model_used": "openai/gpt-oss-120b"
 }
 ```
 
@@ -868,7 +868,7 @@ Generate a time-constrained revision schedule.
     "total_slides": 187
   },
   "mode": "fast",
-  "model_used": "llama-3.3-70b-versatile"
+  "model_used": "openai/gpt-oss-120b"
 }
 ```
 

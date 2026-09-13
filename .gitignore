@@ -42,3 +42,14 @@ SYSTEM.md
 
 # Retrieval observation log: real user query metadata, local only
 logs/
+
+# Generated evaluation artifacts: derived from the user's own corpus and
+# reproducible by re-running eval/eval_pipeline.py. Same reasoning as
+# experiments/benchmarks/ - the scripts are tracked, the outputs are not.
+eval/eval_set.json
+eval/retrieval_results.json
+eval/judge_results.json
+eval/eval_report.html
+
+# Local session task notes
+pending_task.md

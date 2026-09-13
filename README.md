@@ -47,14 +47,16 @@
 | 4 | [System Architecture](#system-architecture) |
 | 5 | [Concurrency & Performance Engineering](#5--concurrency--performance-engineering) |
 | 6 | [Multi-LLM Orchestration](#multi-llm) |
-| 7 | [Tech Stack](#tech-stack) |
-| 8 | [Project Structure](#8--project-structure) |
-| 9 | [Getting Started](#9--getting-started) |
-| 10 | [Environment Variables](#10--environment-variables) |
-| 11 | [Ollama Setup (Required)](#11--ollama-setup-required) |
-| 12 | [Limitations & Honest Trade-offs](#12--limitations--honest-trade-offs) |
-| 13 | [Deep-Dive Documentation](#13--deep-dive-documentation) |
-| 14 | [What Makes This Project Stand Out](#stand-out) |
+| 7 | [Evaluation & Measured Results](#evaluation) |
+| 8 | [Tech Stack](#tech-stack) |
+| 9 | [Project Structure](#8--project-structure) |
+| 10 | [Getting Started](#9--getting-started) |
+| 11 | [Environment Variables](#10--environment-variables) |
+| 12 | [Ollama Setup (Required)](#11--ollama-setup-required) |
+| 13 | [Limitations & Honest Trade-offs](#12--limitations--honest-trade-offs) |
+| 14 | [Deep-Dive Documentation](#13--deep-dive-documentation) |
+| 15 | [Learning & Interview Guide](#learning-guide) |
+| 16 | [What Makes This Project Stand Out](#stand-out) |
 
 ---
 
@@ -392,6 +394,70 @@ Markdown
   <img src="./screenshots/Top_Level_Architecture.drawio.png">
 </figure>
 
+### Request Flow
+
+Two paths, split by **who is waiting**. An upload takes minutes, so it goes on a
+queue and reports progress over SSE. A question has a user waiting on it, so it
+runs synchronously.
+
+```mermaid
+flowchart TB
+    UI["Next.js frontend"]
+
+    subgraph API["FastAPI"]
+        R["Routes<br/>upload · search · jobs · health"]
+        CA["Two-level cache<br/>exact hash → semantic"]
+        FM["fast_mode<br/>hybrid retrieval + LLM"]
+    end
+
+    subgraph W["Celery worker (threads, concurrency 2)"]
+        ING["ingest_task<br/>parse → OCR → structure → embed"]
+    end
+
+    RD[("Redis<br/>broker · cache · rate limits")]
+    SQ[("SQLite + WAL<br/>slides · jobs · PYQ")]
+    CH[("ChromaDB<br/>1024-d vectors")]
+    BM["BM25<br/>in-memory, content-hashed"]
+    GQ["Groq pool<br/>3-model fallback"]
+    OL["Ollama / Gemini<br/>ingestion-time LLM"]
+
+    UI -->|"POST /upload"| R -->|enqueue| RD --> ING
+    UI -->|"GET /jobs/id/stream (SSE)"| R
+    UI -->|"POST /search"| R --> CA --> FM
+    FM --> CH & BM & SQ
+    FM --> GQ --> UI
+    ING --> SQ & CH & OL
+```
+
+### Retrieval Pipeline
+
+```mermaid
+flowchart LR
+    Q["Question"] --> E["Embed<br/>e5-large-v2"]
+    Q --> T["Tokenize"]
+    E --> D["Dense search<br/>ChromaDB<br/>subject-filtered"]
+    T --> S["Sparse search<br/>BM25"]
+    D --> F["RRF fusion<br/>1/(60+rank)"]
+    S --> F
+    F --> FL["Drop non-substantive<br/>deterministic tie-break"]
+    FL --> C["Top 6 → context"]
+    C --> L["Groq LLM"] --> A["Answer + slide citations"]
+```
+
+### Ingestion Pipeline
+
+```mermaid
+flowchart LR
+    U["PDF / PPTX"] --> P["Parse"] --> O["OCR<br/>parallel"] --> TB["Tables"]
+    TB --> M["Merge per page"] --> AI["LLM cleanup<br/>summary · concepts · type"]
+    AI --> DB[("SQLite")]
+    AI --> EM["Embed passages"] --> CH[("ChromaDB")]
+    DB --> BM["BM25 index"]
+```
+
+> **Measured:** the LLM cleanup stage dominates ingestion — roughly **25×** the
+> combined cost of embedding, ChromaDB writes, BM25 and SQLite.
+
 ### 🔄 Three-Phase Ingestion Pipeline
 
 ```
@@ -509,7 +575,7 @@ Markdown
 | **Slide Agent (Gemini)** | Async sliding-window batching with `RedisRateLimiter(10/min)` | **Maximizes throughput** within API rate limit window |
 | **Fast Mode (large context)** | `ModelPool.complete_chunked()` — splits context and distributes across 3 Groq models in parallel | **Handles 10k+ char contexts** without truncation, 3× faster than sequential |
 | **Reasoning Agent Tools** | OpenAI Agents SDK executor — sync tools run in async thread pool | **Non-blocking** tool orchestration (9 tools callable simultaneously) |
-| **Embeddings (batch)** | `sentence-transformers.encode(batch_size=32)` | **Single GPU/CPU pass** for entire document (~0.5s per 100 slides) |
+| **Embeddings (batch)** | `sentence-transformers.encode(batch_size=32)` | **Single batched GPU pass** per document — measured 690 slides in 46.6 s (~6.8 s per 100 slides) |
 | **PYQ Mapping** | Dense (ChromaDB) + Sparse (BM25) searches run, RRF fuses results | **Hybrid precision:** keyword + semantic signals combined per question |
 
 ---
@@ -579,7 +645,7 @@ def _safe_db_op(fn, max_retries=8, initial_delay=0.25):
     raise TimeoutError("DB lock held for >32s")
 ```
 
-**Effect:** Handles transient locks gracefully; 99.9% of writes succeed within 2 retries (<1s wait).
+**Effect:** Handles transient locks gracefully. Measured under a 960-transaction contention benchmark (1–8 concurrent writers): **zero lock failures at every level**.
 
 #### ⚙️ Celery Configuration for Concurrency Safety
 
@@ -677,7 +743,7 @@ async with gate:
                         │ Level 2: FUZZY SEMANTIC     │
                         └─────────────┬───────────────┘
                                       │
-                      Embed query with Ollama (~500ms)
+                   Embed query with e5-large-v2 (~20-75ms)
                                       │
                                       ▼
                       Cosine similarity vs all cached
@@ -792,13 +858,13 @@ ExamPrep AI uses **four distinct LLM configurations** across the pipeline, each 
 ┌──────────────────────────────────────────────────────────────┐
 │ 🚀 GROQ MODEL POOL — 3-Model Round-Robin + Fallback         │
 ├──────────────────────────────────────────────────────────────┤
-│ Model 1: llama-3.3-70b-versatile                             │
+│ Model 1: openai/gpt-oss-120b                                 │
 │   • RPD: 1000  TPD: 100k                                     │
 │                                                              │
-│ Model 2: openai/gpt-oss-120b                                 │
+│ Model 2: openai/gpt-oss-20b                                  │
 │   • RPD: 1000  TPD: 300k                                     │
 │                                                              │
-│ Model 3: meta-llama/llama-4-scout-17b-16e                    │
+│ Model 3: qwen/qwen3.8-27b                                    │
 │   • RPD: 1000  TPD: 500k                                     │
 ├──────────────────────────────────────────────────────────────┤
 │ Load Balancing Strategy:                                     │
@@ -912,6 +978,79 @@ ExamPrep AI uses **four distinct LLM configurations** across the pipeline, each 
 
 ---
 
+---
+
+## <span id="evaluation">📊 Evaluation & Measured Results</span>
+
+Every number here comes from a reproducible experiment in
+[`experiments/`](experiments/). Scripts, raw outputs and written reports are in
+the repository — so "how did you measure this?" always has an answer.
+
+### Retrieval quality
+
+Hybrid retrieval over **114 questions** spanning generated questions,
+keyword-style phrasings, and **real instructor-written exam questions** with
+lexically assigned gold labels:
+
+| Retriever | Recall@1 | Recall@3 | Recall@5 | MRR | nDCG@5 |
+|---|---|---|---|---|---|
+| Dense only (ChromaDB) | 0.640 | 0.728 | 0.754 | 0.687 | 0.679 |
+| Sparse only (BM25) | 0.640 | 0.737 | 0.798 | 0.696 | 0.704 |
+| **Hybrid + RRF** | **0.667** | **0.763** | **0.816** | **0.723** | **0.717** |
+
+Each retriever alone reaches 0.640. **Fusion is what gets to 0.667** — neither
+component is redundant.
+
+**Gold slide present in the LLM's context: 0.842** at the production top-6
+setting. That is the real ceiling on answer quality.
+
+### Answer quality
+
+Graded over 45 answers with mechanical citation checks plus an LLM judge:
+
+| Metric | Result |
+|---|---|
+| Answer correctness **when the gold slide reached the LLM** | **96%** (1 failure in 24) |
+| Answer correctness when it did not | 1.50 / 2 |
+| Groundedness (every claim traceable to context) | 1.10 / 2 — **the weak spot** |
+
+> **The headline finding:** retrieval bounds *correctness*; generation bounds
+> *trustworthiness*. When the right slide arrives, the answer is almost always
+> right — but answers routinely elaborate beyond the slides.
+
+### System performance
+
+| Stage | Measured |
+|---|---|
+| Hybrid retrieval | **~95 ms p50** (78% of it query embedding) |
+| LLM generation | 1.3–12 s depending on model — **10–100× retrieval** |
+| SQLite under 1–8 concurrent writers | **91 txn/s, zero lock failures** across 960 transactions |
+| Indexing 690 slides (embed + Chroma + BM25 + SQLite) | 48.9 s |
+| Ingestion bottleneck | LLM cleanup — **~25×** all other indexing stages combined |
+
+### Things that were tested and rejected
+
+Measuring what *doesn't* work was as valuable as measuring what does:
+
+| Idea | Outcome |
+|---|---|
+| Cross-encoder reranking | Quality down, latency up — **rejected** |
+| Query rewriting | Established on our own data (P > 99.9%); **zero effect** on an independently built set — **rejected** |
+| Tuning RRF's K constant | Flat from K=5 to K=120 — **no gain available** |
+| Larger candidate pool | Flat from 5 to 120 candidates — **rejected** |
+| Adjacent-slide context expansion | Same recall as plain top-10 for 40% more tokens — **rejected** |
+| Dense-distance abstention threshold | 0.941 on constructed data; would refuse **52% of real answerable queries** — **rejected** |
+| Agentic RAG as the default answer path | Lost 9 of 17 head-to-head at 2.36× token cost — **rejected** |
+
+Full write-ups: [`experiments/reports/`](experiments/reports/).
+
+📚 **Want the full technical walkthrough?** See
+[`docs/learning/`](docs/learning/) — a complete guide to the
+[AI/RAG stack](docs/learning/AI-RAG.md), the
+[backend & system design](docs/learning/SYSTEM-DESIGN.md), and
+[interview questions](docs/learning/INTERVIEW-QUESTIONS.md) built from this
+codebase.
+
 ## <span id="tech-stack">7. 🛠️ Tech Stack</span>
 
 **Every technology choice is engineering-driven — no bloat, every component has a measurable performance impact.**
@@ -940,7 +1079,7 @@ ExamPrep AI uses **four distinct LLM configurations** across the pipeline, each 
 |---|---|---|
 | **Celery** | 5.4+ | Distributed task queue with retry logic, task chains, and status tracking; required for long-running ingestion jobs |
 | **Redis** | 7.2+ | Serves triple duty: (1) Celery broker, (2) rate limiter state, (3) distributed semaphore; single-digit ms latency |
-| **SQLite** | 3.45+ | Zero-config RDBMS, ACID guarantees, WAL mode for 10× write concurrency improvement vs rollback journal |
+| **SQLite** | 3.45+ | Zero-config RDBMS, ACID guarantees, WAL mode — measured ~2× lower worst-case write latency than the rollback journal at 8 concurrent writers (1492 ms vs 3122 ms), with zero lock failures across 960 transactions |
 | **SQLAlchemy** | 2.0+ | Type-safe ORM with relationship loading control, prevents N+1 queries, handles connection pooling for SQLite |
 
 ### 🧠 AI & Search Stack
@@ -948,7 +1087,7 @@ ExamPrep AI uses **four distinct LLM configurations** across the pipeline, each 
 | Technology | Version | Why This, Not Alternatives |
 |---|---|---|
 | **ChromaDB** | 0.5+ | Persistent vector store with metadata filtering, SQLite backend → no external service needed, 1024-dim cosine similarity |
-| **intfloat/e5-large-v2** | 1024-dim | SOTA multilingual embeddings (2023 MTEB leaderboard), runs locally on CPU (~500ms for 512 tokens), no API cost |
+| **intfloat/e5-large-v2** | 1024-dim | Strong retrieval quality, runs locally on GPU (measured ~20 ms warm, ~75 ms when the GPU has idled down), no API cost |
 | **BM25** | `rank-bm25` lib | Classic sparse retrieval, excels at exact keyword/acronym matches where dense embeddings fail (e.g., "TCP", "NFS") |
 | **Ollama (LLaMA 3)** | 8B params | Local LLM for file overview + text cleanup + cache fuzzy matching; no API quota, no internet needed after download |
 | **Gemini 2.5 Flash** | — | 1M token context, 1500 RPM free tier, structured output via `response_schema` → 25 slides per call at 60ms/slide |
@@ -1407,6 +1546,22 @@ The following technical deep-dives are planned as separate markdown files:
 | [FRONTEND.md](FRONTEND.md) | **Complete frontend API spec** — all 30+ routes with exact request/response schemas, TypeScript types, error handling patterns, SSE integration guide *(already available)* |
 
 ---
+
+---
+
+## <span id="learning-guide">📚 Learning & Interview Guide</span>
+
+`docs/learning/` is a complete walkthrough of this system, written to be read
+without opening the code.
+
+| Document | What it covers |
+|---|---|
+| **[AI-RAG.md](docs/learning/AI-RAG.md)** | Ingestion, embeddings, BM25, hybrid retrieval, RRF (and why an RRF score is *not* a confidence score), the RAG pipeline, grounding, insufficient-evidence handling, agentic RAG, every evaluation metric, and every experiment that failed |
+| **[SYSTEM-DESIGN.md](docs/learning/SYSTEM-DESIGN.md)** | FastAPI, Celery, Redis, distributed rate limiting (including a real check-then-act race and its Lua fix), SQLite/WAL, indexes, ChromaDB, caching, concurrency limits, local inference, LLM provider fallback, SSE, security (implemented *and* missing), reliability, testing, and how this would scale 100× |
+| **[INTERVIEW-QUESTIONS.md](docs/learning/INTERVIEW-QUESTIONS.md)** | ~50 questions an interviewer would actually ask about this repository, with answers grounded in the measurements |
+
+Each explains **why** a choice was made, what the drawback is, and what would
+break first at scale — with real code snippets from this repository.
 
 ## <span id="stand-out">14. 🎖️ What Makes This Project Stand Out</span>
 
