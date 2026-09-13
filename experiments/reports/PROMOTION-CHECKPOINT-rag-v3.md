@@ -1,5 +1,10 @@
 # Promotion checkpoint v3 — real-query evidence
 
+> **SUPERSEDED by `PROMOTION-CHECKPOINT-rag-v4.md`.** Its two open questions -
+> answer grounding and agentic RAG - are now answered, and a live production
+> LLM outage was found that outranks everything here. Kept unedited as the
+> record of what was believed at the time.
+
 Supersedes `PROMOTION-CHECKPOINT-rag-v2.md`. v2's central open question was
 "what do real queries look like?" That question is now answered, and the answer
 changes the priority order.
