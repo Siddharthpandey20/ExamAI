@@ -107,6 +107,32 @@ def _safe_db_op(fn):
 # Phase / Job status helpers
 # ═════════════════════════════════════════════════════════════════════════
 
+def _log_phase_event(job_id, phase, status, started_at, completed_at, filename=None):
+    """One structured line per phase transition.
+
+    Every line carries job=<id> so a single run can be grepped end to end
+    across the ingest, structure and index tasks, which otherwise log with no
+    shared identifier. Terminal transitions carry the phase duration, which is
+    what actually identifies the slow stage of a 20-minute ingestion.
+
+    Never raises: logging must not be able to fail a task.
+    """
+    try:
+        parts = [f"job={job_id}", f"phase={phase}", f"status={status}"]
+        if filename:
+            parts.append(f"file={filename!r}")
+        if started_at and completed_at:
+            duration = (completed_at - started_at).total_seconds()
+            parts.append(f"duration_sec={duration:.1f}")
+        line = "[lifecycle] " + " ".join(parts)
+        if status == PhaseStatus.FAILED.value:
+            log.error(line)
+        else:
+            log.info(line)
+    except Exception:  # pragma: no cover
+        pass
+
+
 def _update_phase(job_id, phase, status, task_id=None, error=None, progress_pct=None, progress_detail=None):
     """Update a single phase's status and sync the parent job's tracking fields."""
     def _op():
@@ -145,6 +171,13 @@ def _update_phase(job_id, phase, status, task_id=None, error=None, progress_pct=
                 job.updated_at = datetime.now(timezone.utc)
                 if status == PhaseStatus.RUNNING.value and job.status == JobStatus.PENDING.value:
                     job.status = JobStatus.PROCESSING.value
+
+            # One structured line per phase transition, carrying the job id so
+            # a run can be followed end to end, and the phase duration so the
+            # slow stage is identifiable without instrumenting each pipeline.
+            _log_phase_event(job_id, phase, status,
+                             jp.started_at, jp.completed_at,
+                             job.filename if job else None)
     _safe_db_op(_op)
 
 
@@ -325,7 +358,7 @@ def ingest_task(self, filepath, job_id, subject=""):
 
     except Exception as e:
         if _will_retry(self, e):
-            log.warning(f"[ingest] Transient failure, retrying: {e}")
+            log.warning(f"[lifecycle] job={job_id} phase-task=ingest transient failure, retry {(self.request.retries or 0) + 1}/{self.max_retries}: {e}")
             raise
         log.error(f"[ingest] Failed: {filename} — {e}", exc_info=True)
         _fail_job(job_id, "ingest", str(e))
@@ -370,7 +403,7 @@ def structure_task(self, md_path, job_id):
 
     except Exception as e:
         if _will_retry(self, e):
-            log.warning(f"[structure] Transient failure, retrying: {e}")
+            log.warning(f"[lifecycle] job={job_id} phase-task=structure transient failure, retry {(self.request.retries or 0) + 1}/{self.max_retries}: {e}")
             raise
         log.error(f"[structure] Failed: {filename} — {e}", exc_info=True)
         _fail_job(job_id, "structure", str(e))
@@ -430,7 +463,7 @@ def index_task(self, md_path, job_id, subject=""):
 
     except Exception as e:
         if _will_retry(self, e):
-            log.warning(f"[index] Transient failure, retrying: {e}")
+            log.warning(f"[lifecycle] job={job_id} phase-task=index transient failure, retry {(self.request.retries or 0) + 1}/{self.max_retries}: {e}")
             raise
         log.error(f"[index] Failed: {filename} — {e}", exc_info=True)
         _fail_job(job_id, "index", str(e))
@@ -569,7 +602,7 @@ def process_pyq_task(self, filepath, job_id, subject=""):
 
     except Exception as e:
         if _will_retry(self, e):
-            log.warning(f"[pyq] Phase 1 transient failure, retrying: {e}")
+            log.warning(f"[lifecycle] job={job_id} phase-task=pyq1 transient failure, retry {(self.request.retries or 0) + 1}/{self.max_retries}: {e}")
             raise
         log.error(f"[pyq] Phase 1 failed: {filename} — {e}", exc_info=True)
         _fail_job(job_id, "ingest_pyq", str(e))
@@ -594,7 +627,7 @@ def process_pyq_task(self, filepath, job_id, subject=""):
 
     except Exception as e:
         if _will_retry(self, e):
-            log.warning(f"[pyq] Phase 2 transient failure, retrying: {e}")
+            log.warning(f"[lifecycle] job={job_id} phase-task=pyq2 transient failure, retry {(self.request.retries or 0) + 1}/{self.max_retries}: {e}")
             raise
         log.error(f"[pyq] Phase 2 failed: {filename} — {e}", exc_info=True)
         _fail_job(job_id, "extract", str(e))
@@ -666,7 +699,7 @@ def process_pyq_task(self, filepath, job_id, subject=""):
 
     except Exception as e:
         if _will_retry(self, e):
-            log.warning(f"[pyq] Phase 3 transient failure, retrying: {e}")
+            log.warning(f"[lifecycle] job={job_id} phase-task=pyq3 transient failure, retry {(self.request.retries or 0) + 1}/{self.max_retries}: {e}")
             raise
         log.error(f"[pyq] Phase 3 failed: {filename} — {e}", exc_info=True)
         _fail_job(job_id, "map", str(e))
