@@ -1,0 +1,5 @@
+# Generated measurement output. Reproducible by re-running the scripts, and
+# derived from one snapshot of the user's corpus, so it is kept out of the
+# repository for the same reason eval/*.json is.
+benchmarks/
+__pycache__/
