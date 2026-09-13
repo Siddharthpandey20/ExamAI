@@ -6,9 +6,12 @@ camelot-py[cv]
 opencv-python-headless
 requests
 Pillow
+numpy                          # imported directly by ingestion/ocr_engine.py
+python-dotenv                  # load_dotenv() in routes, structuring, pyq, engine
 
 # Structuring module
 openai-agents
+openai                         # AsyncOpenAI imported directly by engine, structuring, pyq
 pydantic
 
 # Indexing module
@@ -40,6 +43,7 @@ rank-bm25
 
 # Job infrastructure
 celery[redis]
+redis                          # imported directly by jobs, rate limiter, health probe
 
 # API layer
 fastapi[standard]
