@@ -183,12 +183,27 @@ def run_hybrid_search(
     embedder: Embedder,
     chroma: ChromaStore,
     top_k: int = SEARCH_TOP_K,
+    stats: dict | None = None,
 ) -> list[dict]:
     """
     Subject-filtered hybrid search: dense (ChromaDB) + sparse (BM25) + RRF.
 
     Returns a list of enriched slide dicts sorted by descending RRF score.
     Non-substantive slides (heading-only, index pages) are filtered out.
+
+    `stats` is an optional caller-owned dict for observability. When supplied it
+    is populated with the dense-retrieval measurements that fusion discards —
+    most importantly `dense_top1`, the raw cosine distance of the nearest slide.
+    RRF scores a *rank*, 1/(RRF_K + rank), so the top fused result scores the
+    same whether the match is excellent or hopeless; the distance magnitude is
+    the only signal here that distinguishes them.
+
+    It is an out-parameter rather than an extra key on the returned dicts
+    because `engine/reasoning_mode.py` serialises those dicts straight into an
+    LLM prompt — a new key there would change production prompt content. With
+    `stats=None` (the default) this function's behaviour and output are
+    unchanged in every respect. The caller owns the dict, so there is no shared
+    mutable state between concurrent searches.
     """
     fetch_n = top_k * 3  # over-fetch to compensate for filtering
 
@@ -205,7 +220,12 @@ def run_hybrid_search(
         dense_raw = chroma.query(query_embedding=query_vec, n_results=fetch_n)
 
     dense_ranked: list[dict] = []
+    dense_distances: list[float] = []
     if dense_raw and dense_raw.get("ids") and dense_raw["ids"][0]:
+        # Chroma returns distances parallel to ids. It is not guaranteed to be
+        # present (some client versions omit it unless requested), so every read
+        # below is guarded and a missing list simply yields no stats.
+        raw_dists = (dense_raw.get("distances") or [[]])[0] or []
         for rank, (cid, meta) in enumerate(
             zip(dense_raw["ids"][0], dense_raw["metadatas"][0]), start=1,
         ):
@@ -216,7 +236,9 @@ def run_hybrid_search(
                 "page_number": page_num,
                 "source_file": meta.get("source_file", ""),
                 "rank": rank,
+                "distance": raw_dists[rank - 1] if rank - 1 < len(raw_dists) else None,
             })
+        dense_distances = [d for d in raw_dists if d is not None]
 
     # ── Sparse search (subject-specific BM25, cached by corpus content) ──
     bm25, corpus_slides = _get_bm25_index(session, subject)
@@ -309,7 +331,32 @@ def run_hybrid_search(
     # document order.  Non-tied ordering is unchanged: -rrf_score ascending
     # is identical to rrf_score descending.
     fused.sort(key=lambda x: (-x["rrf_score"], x["doc_id"], x["page_number"]))
-    return fused[:top_k]
+    result = fused[:top_k]
+
+    # Observability only — see the `stats` note in the docstring. Nothing above
+    # reads this block, and nothing here can influence `result`.
+    if stats is not None:
+        dist_by_key = {r["key"]: r["distance"] for r in dense_ranked}
+        stats["dense_top1"] = dense_distances[0] if dense_distances else None
+        stats["dense_min"] = min(dense_distances) if dense_distances else None
+        stats["dense_mean"] = (
+            sum(dense_distances) / len(dense_distances) if dense_distances else None
+        )
+        stats["n_dense"] = len(dense_ranked)
+        stats["n_sparse"] = len(sparse_ranked)
+        stats["n_fused"] = len(fused)
+        stats["n_returned"] = len(result)
+        # Distance of the slide that actually came first after fusion and
+        # substantive-filtering. This is NOT the same as dense_top1: the nearest
+        # slide may be filtered out as non-substantive, or outranked by a
+        # candidate that both retrievers found.
+        stats["top_result_distance"] = (
+            dist_by_key.get(f"{result[0]['doc_id']}_{result[0]['page_number']}")
+            if result else None
+        )
+        stats["distance_by_key"] = dist_by_key
+
+    return result
 
 
 # ── Filtered queries ─────────────────────────────────────────────────────
