@@ -17,22 +17,18 @@ and therefore the priority tiers, study plans and revision schedules.
 Runs against a throwaway SQLite file. No Celery, no Redis, no network.
 """
 
-import os
-import sys
 
 import pytest
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from indexing.models import Base, Document, Slide, PYQQuestion, PYQMatch  # noqa: E402
-from pyq.mapper import (  # noqa: E402
+from indexing.models import Base, Document, Slide, PYQQuestion, PYQMatch
+from pyq.mapper import (
     record_matches,
     recompute_importance_scores,
     is_pyq_already_ingested,
 )
-from pyq.schemas import ExtractedQuestion, RRFResult  # noqa: E402
+from pyq.schemas import ExtractedQuestion, RRFResult
 
 SOURCE = "CN.pdf"
 SUBJECT = "CN"

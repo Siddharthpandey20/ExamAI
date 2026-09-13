@@ -13,18 +13,14 @@ query_text stays normalised for L2 to compare against.
 Runs against a throwaway SQLite file. No Ollama, no LLM, no network.
 """
 
-import os
-import sys
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import engine.cache as cache_mod  # noqa: E402
-from engine.cache import _make_hash, check_cache, store_cache  # noqa: E402
-from indexing.models import Base, QueryCache  # noqa: E402
+import engine.cache as cache_mod
+from engine.cache import _make_hash, check_cache, store_cache
+from indexing.models import Base, QueryCache
 
 RAW = "is tcp congestion control covered in ppt?"
 NORMALISED = "TCP congestion control"

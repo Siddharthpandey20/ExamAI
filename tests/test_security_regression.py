@@ -16,17 +16,14 @@ No database, network, Ollama, Redis or server required.
 """
 
 import os
-import sys
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from indexing.models import Base, Document, Slide  # noqa: E402
-from engine.tools import search_by_type, search_by_concept, get_priority_slides  # noqa: E402
-from routes.uploads import ALLOWED_EXTENSIONS, _validate_file, safe_upload_path  # noqa: E402
+from indexing.models import Base, Document, Slide
+from engine.tools import search_by_type, search_by_concept, get_priority_slides
+from routes.uploads import ALLOWED_EXTENSIONS, _validate_file, safe_upload_path
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────

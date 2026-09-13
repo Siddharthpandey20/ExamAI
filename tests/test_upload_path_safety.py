@@ -13,14 +13,11 @@ Pure filesystem logic: no database, no network, no server.
 """
 
 import os
-import sys
 
 import pytest
 from fastapi import HTTPException
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from routes.uploads import safe_upload_path  # noqa: E402
+from routes.uploads import safe_upload_path
 
 
 @pytest.fixture()

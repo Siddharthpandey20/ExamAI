@@ -15,14 +15,10 @@ These tests exercise the sort contract directly, with no database, network
 or model required.
 """
 
-import os
-import sys
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from pyq.schemas import RRFResult  # noqa: E402
+from pyq.schemas import RRFResult
 
 RRF_K = 60
 

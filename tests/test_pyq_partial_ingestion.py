@@ -18,19 +18,15 @@ These tests exercise that decision logic against a throwaway database. No
 Celery, Redis, Ollama or network.
 """
 
-import os
-import sys
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from indexing.models import Base, Document, Slide, PYQQuestion, PYQMatch  # noqa: E402
-from jobs.models import Job, JobStatus, JobType  # noqa: E402
-from pyq.mapper import record_matches, is_pyq_already_ingested  # noqa: E402
-from pyq.schemas import ExtractedQuestion, RRFResult  # noqa: E402
+from indexing.models import Base, Document, Slide, PYQQuestion, PYQMatch
+from jobs.models import Job, JobStatus, JobType
+from pyq.mapper import record_matches, is_pyq_already_ingested
+from pyq.schemas import ExtractedQuestion, RRFResult
 
 PAPER, SUBJECT, TOTAL = "Midterm2024.pdf", "CN", 10
 THIS_JOB = 999

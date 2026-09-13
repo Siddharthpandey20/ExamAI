@@ -20,15 +20,11 @@ failure modes were measured against the corpus and are locked in here:
 Ollama is mocked, so these run anywhere with no network or model.
 """
 
-import os
-import sys
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import ingestion.ai_cleanup as ac  # noqa: E402
-from ingestion.ai_cleanup import _strip_ai_preamble, cleanup_text  # noqa: E402
+import ingestion.ai_cleanup as ac
+from ingestion.ai_cleanup import _strip_ai_preamble, cleanup_text
 
 
 # ── 1. The destructive-truncation regression ─────────────────────────────
