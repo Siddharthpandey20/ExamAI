@@ -167,6 +167,77 @@ def _update_progress(job_id, phase, pct, detail=None):
     _safe_db_op(_op)
 
 
+# ═════════════════════════════════════════════════════════════════════════
+# Retry classification
+# ═════════════════════════════════════════════════════════════════════════
+#
+# Only genuinely transient faults are retried. A blanket
+# autoretry_for=(Exception,) would keep re-running deterministic failures —
+# a corrupt PDF, an unsupported file, an exhausted daily quota — burning
+# provider quota and delaying the error the user needs to see.
+#
+# Retrying is only safe because every task is idempotent: ingest, structure
+# and index each skip work that is already done, process_pyq refuses to
+# re-ingest a paper that is partially stored, and remap re-attaches matches
+# to existing question rows.
+#
+# Deliberately NOT retried:
+#   GeminiQuotaExhausted     daily quota; the message already tells the user
+#                            to retry tomorrow, and minutes of backoff cannot
+#                            help
+#   RuntimeError             "produced no output" - the pipeline already
+#                            swallowed the real error and returned None, so a
+#                            retry reruns the same deterministic failure
+#   AuthenticationError,     credential and request-shape problems; retrying
+#   BadRequestError, ...     cannot fix configuration
+#   parsing / validation     deterministic by nature
+
+TRANSIENT_ERRORS: tuple[type[BaseException], ...] = ()
+try:  # pragma: no cover - import guards only
+    import openai as _openai
+    import requests as _requests
+    import redis as _redis
+    from sqlalchemy.exc import OperationalError as _OperationalError
+
+    TRANSIENT_ERRORS = (
+        _openai.APIConnectionError,     # network to Gemini/Groq/Ollama; also APITimeoutError
+        _openai.InternalServerError,    # provider 5xx
+        _openai.RateLimitError,         # 429 that escaped the in-client fallbacks
+        _requests.exceptions.ConnectionError,
+        _requests.exceptions.Timeout,
+        _redis.exceptions.ConnectionError,
+        _redis.exceptions.TimeoutError,
+        _OperationalError,              # SQLite lock that escaped _safe_db_op
+    )
+except Exception:  # pragma: no cover
+    log.warning("[retry] Could not build transient-error tuple; retries disabled")
+
+# Shared retry policy. Backoff is exponential with jitter so a provider that
+# is rate-limiting us is not hammered in lockstep by several workers.
+RETRY_POLICY = dict(
+    autoretry_for=TRANSIENT_ERRORS,
+    retry_backoff=True,
+    retry_backoff_max=300,
+    retry_jitter=True,
+    max_retries=3,
+)
+
+
+def _will_retry(task, exc) -> bool:
+    """True when Celery is going to retry this exception for this task.
+
+    Used to defer _fail_job: marking the job failed on an attempt that is
+    about to be retried would leave a successful retry showing as FAILED,
+    because only index_task's _complete_job ever clears that state.
+    """
+    if not TRANSIENT_ERRORS or not isinstance(exc, TRANSIENT_ERRORS):
+        return False
+    try:
+        return (task.request.retries or 0) < (task.max_retries or 0)
+    except Exception:  # pragma: no cover - outside a request context
+        return False
+
+
 def _fail_job(job_id, phase, error):
     """Mark a job and its current phase as failed."""
     def _op():
@@ -205,7 +276,7 @@ def _complete_job(job_id):
 # Study Material Tasks — chained: ingest → structure → index
 # ═════════════════════════════════════════════════════════════════════════
 
-@app.task(bind=True, name="jobs.ingest")
+@app.task(bind=True, name="jobs.ingest", **RETRY_POLICY)
 def ingest_task(self, filepath, job_id, subject=""):
     """
     Phase 1: Parse a raw upload (PDF/PPTX) into knowledge markdown.
@@ -253,12 +324,15 @@ def ingest_task(self, filepath, job_id, subject=""):
         return md_path
 
     except Exception as e:
+        if _will_retry(self, e):
+            log.warning(f"[ingest] Transient failure, retrying: {e}")
+            raise
         log.error(f"[ingest] Failed: {filename} — {e}", exc_info=True)
         _fail_job(job_id, "ingest", str(e))
         raise
 
 
-@app.task(bind=True, name="jobs.structure")
+@app.task(bind=True, name="jobs.structure", **RETRY_POLICY)
 def structure_task(self, md_path, job_id):
     """
     Phase 2: Run agentic structuring (LLM classification) on the markdown.
@@ -295,12 +369,15 @@ def structure_task(self, md_path, job_id):
         return md_path
 
     except Exception as e:
+        if _will_retry(self, e):
+            log.warning(f"[structure] Transient failure, retrying: {e}")
+            raise
         log.error(f"[structure] Failed: {filename} — {e}", exc_info=True)
         _fail_job(job_id, "structure", str(e))
         raise
 
 
-@app.task(bind=True, name="jobs.index")
+@app.task(bind=True, name="jobs.index", **RETRY_POLICY)
 def index_task(self, md_path, job_id, subject=""):
     """
     Phase 3: Embed structured knowledge into ChromaDB + SQLite.
@@ -352,6 +429,9 @@ def index_task(self, md_path, job_id, subject=""):
         }
 
     except Exception as e:
+        if _will_retry(self, e):
+            log.warning(f"[index] Transient failure, retrying: {e}")
+            raise
         log.error(f"[index] Failed: {filename} — {e}", exc_info=True)
         _fail_job(job_id, "index", str(e))
         raise
@@ -361,7 +441,7 @@ def index_task(self, md_path, job_id, subject=""):
 # PYQ Task — single task with internal phase tracking
 # ═════════════════════════════════════════════════════════════════════════
 
-@app.task(bind=True, name="jobs.process_pyq")
+@app.task(bind=True, name="jobs.process_pyq", **RETRY_POLICY)
 def process_pyq_task(self, filepath, job_id, subject=""):
     """
     Process a PYQ file through all three phases sequentially:
@@ -488,6 +568,9 @@ def process_pyq_task(self, filepath, job_id, subject=""):
         _update_phase(job_id, "ingest_pyq", PhaseStatus.COMPLETED.value)
 
     except Exception as e:
+        if _will_retry(self, e):
+            log.warning(f"[pyq] Phase 1 transient failure, retrying: {e}")
+            raise
         log.error(f"[pyq] Phase 1 failed: {filename} — {e}", exc_info=True)
         _fail_job(job_id, "ingest_pyq", str(e))
         raise
@@ -510,6 +593,9 @@ def process_pyq_task(self, filepath, job_id, subject=""):
         _update_phase(job_id, "extract", PhaseStatus.COMPLETED.value)
 
     except Exception as e:
+        if _will_retry(self, e):
+            log.warning(f"[pyq] Phase 2 transient failure, retrying: {e}")
+            raise
         log.error(f"[pyq] Phase 2 failed: {filename} — {e}", exc_info=True)
         _fail_job(job_id, "extract", str(e))
         raise
@@ -579,6 +665,9 @@ def process_pyq_task(self, filepath, job_id, subject=""):
         }
 
     except Exception as e:
+        if _will_retry(self, e):
+            log.warning(f"[pyq] Phase 3 transient failure, retrying: {e}")
+            raise
         log.error(f"[pyq] Phase 3 failed: {filename} — {e}", exc_info=True)
         _fail_job(job_id, "map", str(e))
         raise
@@ -605,7 +694,7 @@ def _trigger_pyq_remap(subject: str):
         remap_pyq_task.apply_async(args=[subject])
 
 
-@app.task(bind=True, name="jobs.remap_pyq")
+@app.task(bind=True, name="jobs.remap_pyq", **RETRY_POLICY)
 def remap_pyq_task(self, subject):
     """
     Re-run hybrid search for ALL existing PYQ questions against the
