@@ -34,7 +34,11 @@ OLLAMA_MAX_CONCURRENCY = 3
 # ── Groq (Slide-Level Agent) ────────────────────────────────────────────
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+# Currently unreferenced — the slide agent runs on Gemini/Ollama. Kept in sync
+# with engine/config.py anyway: the previous value here was
+# "llama-3.3-70b-versatile", which Groq has decommissioned, so anything wired to
+# it would have failed with a 404.
+GROQ_MODEL = "openai/gpt-oss-120b"
 
 # ── Gemini(Slide-Level Agent) ────────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")

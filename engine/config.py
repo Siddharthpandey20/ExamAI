@@ -18,27 +18,41 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 # Fallback model chain — ordered by quality.
 # Tokens distribute across models to avoid hitting any single limit.
+#
+# Every id here must be one the provider actually serves. Two previous entries,
+# "llama-3.3-70b-versatile" and "meta-llama/llama-4-scout-17b-16e-instruct",
+# were decommissioned by Groq and began returning 404; because the pool only
+# treated 429 as fallback-worthy, 67% of requests failed and reasoning mode
+# failed completely. engine/llm.py now retires a 404 model and falls through,
+# and GET /api/health/models compares this list against the provider's live
+# list so the next retirement is visible before it breaks anything.
+#
+# Each id below was verified live against the provider on 2026-09-13.
 GROQ_MODELS = [
     {
-        "model": "llama-3.3-70b-versatile",
-        "rpm": 30,           # requests / minute
-        "tpm": 12_000,       # tokens / minute
+        "model": "openai/gpt-oss-120b",
+        "rpm": 60,           # requests / minute
+        "tpm": 10_000,       # tokens / minute
         "rpd": 1_000,        # requests / day
-        "tpd": 100_000,      # tokens / day
+        "tpd": 300_000,      # tokens / day
     },
     {
-        "model": "openai/gpt-oss-120b",
+        # Smaller sibling of the above; same API shape, lower quality, used as
+        # spillover when the 120b hits a minute-window limit.
+        "model": "openai/gpt-oss-20b",
         "rpm": 60,
         "tpm": 10_000,
         "rpd": 1_000,
         "tpd": 300_000,
     },
     {
-        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+        # Third chain entry from a different family, so a single vendor-side
+        # withdrawal cannot empty the pool.
+        "model": "qwen/qwen3.8-27b",
         "rpm": 30,
-        "tpm": 30_000,
+        "tpm": 10_000,
         "rpd": 1_000,
-        "tpd": 500_000,
+        "tpd": 300_000,
     },
 ]
 

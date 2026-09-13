@@ -3,6 +3,7 @@ routes/health.py — readiness probe.
 
 GET /api/health        — liveness, defined in main.py, unchanged
 GET /api/health/ready  — readiness: can this process actually serve traffic?
+GET /api/health/models — are the configured LLM model ids still served?
 
 Liveness and readiness answer different questions. The existing /api/health
 returns a static ok, which is correct for "the process is up" but says
@@ -87,6 +88,23 @@ def _check_chroma() -> str:
     return f"{get_chroma().count()} vectors"
 
 
+def _llm_pool_state() -> dict:
+    """What the pool has LEARNED at runtime. No network call.
+
+    A model id that the provider has retired answers 404, and `complete()`
+    retires it from the pool for the life of the process. Surfacing that here
+    turns a silent per-request failure into something a dashboard can see,
+    and costs nothing because it is just in-memory state.
+    """
+    try:
+        from engine.llm import pool
+        return {"configured": [t.model for t in pool._trackers],
+                "usable": pool.available_models(),
+                "retired_by_provider": pool.unavailable_models()}
+    except Exception as exc:                      # noqa: BLE001
+        return {"error": type(exc).__name__}
+
+
 def _embedder_state() -> str:
     """Reported, never forced: loading the model takes far too long for a probe."""
     import engine
@@ -113,4 +131,54 @@ def readiness(response: Response):
         "status": "ready" if ready else "not ready",
         "checks": checks,
         "embedder": _embedder_state(),
+        # Reported, not gating: a provider retiring a model is a configuration
+        # problem to be seen, not a reason to take this instance out of
+        # rotation while the remaining models still serve traffic.
+        "llm_models": _llm_pool_state(),
+    }
+
+
+@router.get("/models")
+def model_liveness(response: Response):
+    """Compare configured model ids against what the provider actually serves.
+
+    Deliberately a separate endpoint rather than part of /ready: it makes a
+    network call to a third party, and readiness probes are polled often and
+    should not depend on someone else's uptime.
+
+    This exists because two of three configured models were decommissioned and
+    nothing detected it until 67% of requests were already failing. A 404 from
+    a model id is not a transient error - it never recovers on its own - so it
+    should be visible from a URL rather than inferred from logs.
+    """
+    from engine.config import GROQ_MODELS
+
+    configured = [m["model"] for m in GROQ_MODELS]
+
+    def _probe() -> str:
+        from openai import OpenAI
+        from engine.config import GROQ_API_KEY, GROQ_BASE_URL
+        client = OpenAI(api_key=GROQ_API_KEY, base_url=GROQ_BASE_URL,
+                        timeout=PROBE_TIMEOUT_SECONDS)
+        return ",".join(sorted(m.id for m in client.models.list().data))
+
+    probe = _timed("provider_models", _probe)
+    if not probe["ok"]:
+        response.status_code = 503
+        return {"status": "unknown", "configured": configured,
+                "detail": probe["detail"],
+                "note": "could not reach the provider to list models"}
+
+    served = set(probe["detail"].split(",")) if probe["detail"] else set()
+    missing = [m for m in configured if m not in served]
+    response.status_code = 200 if not missing else 503
+    return {
+        "status": "ok" if not missing else "configuration stale",
+        "configured": configured,
+        "serving": [m for m in configured if m in served],
+        "missing_at_provider": missing,
+        "ms": probe["ms"],
+        "action": (None if not missing else
+                   "Remove or replace these ids in GROQ_MODELS "
+                   "(engine/config.py); requests routed to them will 404."),
     }

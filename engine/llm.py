@@ -60,6 +60,12 @@ class _ModelTracker:
     # Backoff: set when we get a 429
     _blocked_until: float = 0.0
 
+    # Set when the provider reports the model does not exist (HTTP 404).
+    # Unlike a 429 this never clears on its own: a decommissioned model stays
+    # gone until someone edits GROQ_MODELS, so retrying it every minute just
+    # burns a request and an exception on every round of the round-robin.
+    _unavailable: bool = False
+
     def _reset_minute(self):
         now = time.time()
         if now - self._min_start >= 60:
@@ -76,6 +82,8 @@ class _ModelTracker:
 
     def can_send(self, est_tokens: int) -> bool:
         """Check if this model can accept a request with estimated token count."""
+        if self._unavailable:
+            return False
         if time.time() < self._blocked_until:
             return False
         self._reset_minute()
@@ -104,6 +112,19 @@ class _ModelTracker:
         """Mark model as blocked after a 429 response."""
         self._blocked_until = time.time() + seconds
         log.warning(f"[LLM] Model '{self.model}' rate-limited, blocked for {seconds}s")
+
+    def mark_unavailable(self, reason: str = "not found at provider"):
+        """Retire a model the provider no longer serves (HTTP 404)."""
+        if not self._unavailable:
+            log.error(
+                "[LLM] Model '%s' %s - removing it from the pool for this "
+                "process. Update GROQ_MODELS in engine/config.py.",
+                self.model, reason)
+        self._unavailable = True
+
+    @property
+    def is_available(self) -> bool:
+        return not self._unavailable
 
     @property
     def day_tokens_remaining(self) -> int:
@@ -149,9 +170,37 @@ class ModelPool:
         return None
 
     def get_best_model_name(self, est_tokens: int = 500) -> str:
-        """Return the model name that should be used next (for agent init)."""
+        """Return the model name that should be used next (for agent init).
+
+        The fallback path matters as much as the happy path here: reasoning
+        mode builds its agent around whatever this returns and has no
+        round-robin to rescue it, so handing back a decommissioned model breaks
+        that endpoint completely. When every model is merely rate-limited we
+        still return the first one - the caller will wait - but a model known
+        to be gone is never returned while any live one exists.
+        """
         t = self._pick_model(est_tokens)
-        return t.model if t else self._trackers[0].model
+        if t:
+            return t.model
+        for tracker in self._trackers:
+            if tracker.is_available:
+                return tracker.model
+        return self._trackers[0].model
+
+    def _stale_config_message(self) -> str:
+        return (
+            "No usable Groq model is configured. The provider returned 404 "
+            f"for: {', '.join(self.unavailable_models())}. "
+            "Update GROQ_MODELS in engine/config.py."
+        )
+
+    def available_models(self) -> list[str]:
+        """Models not known to be retired at the provider."""
+        return [t.model for t in self._trackers if t.is_available]
+
+    def unavailable_models(self) -> list[str]:
+        """Models the provider has answered 404 for during this process."""
+        return [t.model for t in self._trackers if not t.is_available]
 
     async def complete(
         self,
@@ -171,7 +220,12 @@ class ModelPool:
         for attempt in range(len(self._trackers)):
             tracker = self._pick_model(est)
             if tracker is None:
-                # All models rate-limited — wait 30s and try once more
+                # Distinguish "everything is busy" from "nothing is configured
+                # that still exists". Waiting 30s helps the first and is pure
+                # dead time for the second, and the old message blamed rate
+                # limits for what is really a stale config.
+                if not self.available_models():
+                    raise RuntimeError(self._stale_config_message())
                 log.warning("[LLM] All models busy, waiting 30s ...")
                 await asyncio.sleep(30)
                 tracker = self._pick_model(est)
@@ -201,8 +255,22 @@ class ModelPool:
                 if e.status_code == 429:
                     tracker.mark_blocked(60)
                     continue
+                # 404 means the provider has retired this model id. It is a
+                # configuration problem, not a transient one, but it must not
+                # take the request down: retire the model and fall through to
+                # the next in the chain. Any other status is a real error and
+                # still propagates.
+                if e.status_code == 404:
+                    tracker.mark_unavailable()
+                    continue
                 raise
 
+        # Falling out of the loop with nothing usable left means every
+        # configured id was retired during these attempts, not that they were
+        # busy. Reporting "rate-limited" here sent the previous outage looking
+        # for a quota problem that did not exist.
+        if not self.available_models():
+            raise RuntimeError(self._stale_config_message())
         raise RuntimeError("All Groq models failed after retries.")
 
     async def complete_chunked(
