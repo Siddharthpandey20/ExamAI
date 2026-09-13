@@ -21,6 +21,7 @@ from engine import get_embedder, get_chroma
 from engine.config import GROQ_API_KEY, GROQ_BASE_URL, TOOL_OUTPUT_MAX_CHARS
 from engine.llm import pool
 from engine.cache import smart_cache_check, store_cache
+from engine.observability import observe
 from engine.tools import (
     run_hybrid_search,
     get_slide_detail,
@@ -93,9 +94,12 @@ def _make_tools(subject: str):
         chroma = get_chroma()
         session = SessionFactory()
         try:
-            results = run_hybrid_search(
-                query, subject, session, embedder, chroma, top_k=top_k,
-            )
+            with observe("reasoning_search", subject, query) as obs:
+                results = run_hybrid_search(
+                    query, subject, session, embedder, chroma, top_k=top_k,
+                    stats=obs.stats,
+                )
+                obs.done(results, answered=bool(results))
             if not results:
                 return "No matching slides found for this query."
             return _trim(json.dumps(results, indent=2))

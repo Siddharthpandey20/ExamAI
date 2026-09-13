@@ -39,3 +39,6 @@ test_db_concurrency.py
 test_comprehensive.py
 
 SYSTEM.md
+
+# Retrieval observation log: real user query metadata, local only
+logs/

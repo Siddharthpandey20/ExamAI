@@ -13,6 +13,7 @@ from engine import get_embedder, get_chroma
 from engine.config import CONTEXT_MAX_SLIDES, MAX_CONTEXT_CHARS
 from engine.llm import pool, chunk_text
 from engine.cache import smart_cache_check, store_cache
+from engine.observability import observe
 from engine.tools import (
     run_hybrid_search,
     get_priority_slides,
@@ -97,10 +98,12 @@ async def fast_search(query: str, subject: str, force: bool = False) -> dict:
 
         session = SessionFactory()
         try:
-            slides = run_hybrid_search(
-                query, subject, session, embedder, chroma,
-                top_k=CONTEXT_MAX_SLIDES,
-            )
+            with observe("fast_search", subject, query) as obs:
+                slides = run_hybrid_search(
+                    query, subject, session, embedder, chroma,
+                    top_k=CONTEXT_MAX_SLIDES, stats=obs.stats,
+                )
+                obs.done(slides, answered=bool(slides))
 
             if not slides:
                 return {
@@ -177,9 +180,12 @@ async def fast_coverage(topic: str, subject: str, force: bool = False) -> dict:
 
         session = SessionFactory()
         try:
-            slides = run_hybrid_search(
-                topic, subject, session, embedder, chroma, top_k=8,
-            )
+            with observe("fast_coverage", subject, topic) as obs:
+                slides = run_hybrid_search(
+                    topic, subject, session, embedder, chroma, top_k=8,
+                    stats=obs.stats,
+                )
+                obs.done(slides, answered=bool(slides))
 
             if not slides:
                 return {
