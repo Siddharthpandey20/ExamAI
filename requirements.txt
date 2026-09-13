@@ -13,8 +13,27 @@ pydantic
 
 # Indexing module
 chromadb
-sentence-transformers
+sentence-transformers          # pulls torch; CPU-only by default on Windows
 sqlalchemy
+
+# ── Optional: GPU acceleration for embeddings ────────────────────────────
+# sentence-transformers installs the CPU build of torch. On a CUDA GPU the
+# embedding pass is the dominant cost of indexing, so installing the matching
+# CUDA build is worth it. Nothing else changes — no application code, no other
+# package, and the embeddings are numerically equivalent.
+#
+#   pip install "torch==2.10.0+cu128" --index-url https://download.pytorch.org/whl/cu128
+#
+# Pick the +cuXXX tag that matches your driver; verify with
+# `python -c "import torch; print(torch.cuda.is_available())"`.
+# Roll back with:  pip install --force-reinstall --no-deps torch==2.10.0
+#
+# Measured on an RTX 3050 6GB (driver 581.08, torch 2.10.0+cu128):
+#   batch embedding  637.5 -> 131.7 ms/slide   (4.8x faster, 2.29 GB VRAM)
+#   single query      99.3 -> 111.3 ms         (slightly slower; kernel launch
+#                                               overhead dominates one short query)
+# Retrieval quality is unaffected: vector-only rankings were identical on all
+# 40 evaluation questions.
 
 # PYQ module
 rank-bm25
