@@ -12,7 +12,7 @@ import logging
 import re
 import threading
 
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, tuple_
 from sqlalchemy.orm import Session
 from rank_bm25 import BM25Okapi
 
@@ -246,6 +246,38 @@ def run_hybrid_search(
     sparse_map = {r["key"]: r["rank"] for r in sparse_ranked}
     all_keys = set(dense_map) | set(sparse_map)
 
+    # Resolve every fused candidate in two queries instead of two per key.
+    # Previously this loop issued one Slide lookup and one Document lookup per
+    # key — roughly 72 queries for a 36-candidate fusion.
+    #
+    # Semantics are preserved exactly: slides are still matched on
+    # (doc_id, page_number) with no subject filter, a key with no matching
+    # slide is still skipped, and a slide whose document is missing still
+    # yields doc=None. Ordering is unaffected because the sort below is
+    # total — (-rrf_score, doc_id, page_number) — so the order in which
+    # candidates were appended cannot influence the result.
+    parsed_keys = {}
+    for key in all_keys:
+        doc_id, page_num = (int(x) for x in key.split("_"))
+        parsed_keys[key] = (doc_id, page_num)
+
+    slides_by_key: dict[tuple[int, int], Slide] = {}
+    if parsed_keys:
+        for sl in (
+            session.query(Slide)
+            .filter(tuple_(Slide.doc_id, Slide.page_number).in_(list(parsed_keys.values())))
+            .all()
+        ):
+            slides_by_key[(sl.doc_id, sl.page_number)] = sl
+
+    docs_by_id: dict[int, Document] = {}
+    needed_doc_ids = {sl.doc_id for sl in slides_by_key.values()}
+    if needed_doc_ids:
+        docs_by_id = {
+            d.id: d
+            for d in session.query(Document).filter(Document.id.in_(needed_doc_ids)).all()
+        }
+
     fused: list[dict] = []
     for key in all_keys:
         score = 0.0
@@ -256,16 +288,11 @@ def run_hybrid_search(
         if s_rank is not None:
             score += 1.0 / (RRF_K + s_rank)
 
-        doc_id, page_num = (int(x) for x in key.split("_"))
-        slide = (
-            session.query(Slide)
-            .filter(Slide.doc_id == doc_id, Slide.page_number == page_num)
-            .first()
-        )
+        slide = slides_by_key.get(parsed_keys[key])
         if not slide or not is_substantive(slide):
             continue
 
-        doc = _doc_for_slide(slide, session)
+        doc = docs_by_id.get(slide.doc_id)
         d = slide_to_dict(slide, doc)
         d["rrf_score"] = round(score, 6)
         d["dense_rank"] = d_rank
