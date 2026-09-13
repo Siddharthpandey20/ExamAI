@@ -345,13 +345,73 @@ def step2_retrieval(eval_set):
 #  STEP 3 — Retrieval Metrics
 # ═══════════════════════════════════════════════════════════════════════
 
-def recall_at_k(retrieved, gold, k): return 1.0 if gold in retrieved[:k] else 0.0
+def _gold_set(gold):
+    """Accept either a single gold slide id or a set of them."""
+    if gold is None:
+        return set()
+    if isinstance(gold, (list, tuple, set, frozenset)):
+        return {g for g in gold if g is not None}
+    return {gold}
+
+
+def recall_at_k(retrieved, gold, k):
+    """Share of the gold set present in the top k.
+
+    Identical to the old single-gold behaviour (1.0 on a hit, 0.0 otherwise)
+    because a one-element set divides by one.
+    """
+    g = _gold_set(gold)
+    if not g:
+        return 0.0
+    return len(g & set(retrieved[:k])) / len(g)
+
+
 def mrr(retrieved, gold):
+    """Reciprocal rank of the FIRST gold slide found."""
+    g = _gold_set(gold)
     for i, s in enumerate(retrieved):
-        if s == gold: return 1.0 / (i + 1)
+        if s in g:
+            return 1.0 / (i + 1)
     return 0.0
+
+
 def ndcg_at_k(retrieved, gold, k=5):
-    return sum(1.0 / math.log2(i + 2) for i, s in enumerate(retrieved[:k]) if s == gold)
+    """nDCG@k with binary relevance, normalised by the ideal DCG.
+
+    The previous implementation returned raw DCG. With a single gold slide
+    the ideal DCG is 1/log2(2) == 1.0, so the two coincide and every number
+    recorded so far remains valid. They diverge as soon as gold is a set,
+    where un-normalised DCG can exceed 1.0 — hence the explicit IDCG.
+    """
+    g = _gold_set(gold)
+    if not g:
+        return 0.0
+    dcg = sum(1.0 / math.log2(i + 2) for i, s in enumerate(retrieved[:k]) if s in g)
+    idcg = sum(1.0 / math.log2(i + 2) for i in range(min(len(g), k)))
+    return dcg / idcg if idcg else 0.0
+
+
+# ── Citation accuracy ────────────────────────────────────────────────────
+
+_CITATION_RE = re.compile(r"page\s+(\d+)\s+of\s+([^\s,;:)]+)", re.IGNORECASE)
+
+
+def citation_accuracy(answer, allowed_pages):
+    """Share of "Page X of file" citations that point at a retrieved slide.
+
+    Answers are instructed to cite specific slides; a citation to a page that
+    was never retrieved is a fabricated reference. *allowed_pages* is the set
+    of page numbers belonging to the slides that were actually given to the
+    model.
+
+    Returns (accuracy, n_citations). Accuracy is None when the answer made no
+    citation at all, so "did not cite" is not scored as "cited wrongly".
+    """
+    pages = [int(m.group(1)) for m in _CITATION_RE.finditer(answer or "")]
+    if not pages:
+        return None, 0
+    ok = sum(1 for p in pages if p in allowed_pages)
+    return ok / len(pages), len(pages)
 
 def step3_retrieval_metrics(retrieval_results):
     print("[Step 3/7] Computing retrieval metrics...")
@@ -429,6 +489,8 @@ def step4_answer_and_judge(eval_set, retrieval_results):
         parsed = _api_call_with_retry(
             messages=[{"role": "user", "content":
                 "For each question below, generate a 3-5 sentence answer using ONLY the provided slide material.\n"
+                "Cite the slides you use as 'Page X of filename', matching how the production "
+                "assistant is instructed to answer, so citation accuracy can be measured.\n"
                 "Do not add information not present in the material. Be specific and factual.\n\n"
                 + "\n".join(items) + f"\n\nReturn JSON with an \"answers\" array of exactly {len(batch)} strings."}],
             response_format=GeneratedAnswerBatch,
@@ -523,7 +585,54 @@ def step5_importance_validation():
 #  STEP 6 — Latency Benchmark
 # ═══════════════════════════════════════════════════════════════════════
 
+def step_citation_metrics(judge_results, retrieval_results):
+    """How many "Page X of file" citations point at a slide we retrieved.
+
+    A citation to a page that was never in the context is a fabricated
+    reference, which faithfulness scoring does not reliably catch.
+    """
+    print("[Step] Citation accuracy...")
+    ret_map = {r["id"]: r for r in retrieval_results}
+
+    session = SessionFactory()
+    try:
+        pages = dict(session.query(Slide.id, Slide.page_number).all())
+    finally:
+        session.close()
+
+    scored, uncited, total_citations = [], 0, 0
+    for j in judge_results:
+        allowed = {pages.get(sid) for sid in ret_map.get(j["id"], {}).get("hybrid_top5", [])}
+        allowed.discard(None)
+        acc, n = citation_accuracy(j.get("generated_answer", ""), allowed)
+        total_citations += n
+        if acc is None:
+            uncited += 1
+        else:
+            scored.append(acc)
+
+    result = {
+        "mean_citation_accuracy": round(sum(scored) / len(scored), 4) if scored else None,
+        "answers_with_citations": len(scored),
+        "answers_without_citations": uncited,
+        "total_citations": total_citations,
+    }
+    if scored:
+        print(f"  accuracy={result['mean_citation_accuracy']:.3f} over "
+              f"{total_citations} citations in {len(scored)} answers "
+              f"({uncited} answers cited nothing)")
+    else:
+        print(f"  no citations found in {uncited} answers")
+    return result
+
+
 def step6_latency(eval_set):
+    """Retrieval latency and warm-cache hit rate.
+
+    Retrieval only. End-to-end latency additionally includes the Groq round
+    trip, which needs live API calls and quota, so it is measured separately
+    rather than folded in here — mixing them would hide which half moved.
+    """
     print("[Step 6/7] Latency benchmark...")
     sample = random.sample(eval_set, min(15, len(eval_set)))
     embedder, chroma = Embedder(), ChromaStore()
@@ -537,14 +646,25 @@ def step6_latency(eval_set):
         total_cache = session.query(func.count(QueryCache.id)).scalar() or 0
     finally:
         session.close()
+
+    # Warm-cache hit rate: how many of these questions L1 could already answer.
+    from engine.cache import check_cache
+    hits = sum(1 for qa in sample if check_cache(qa["subject"], "search", qa["question"]))
+
     latencies.sort()
     n = len(latencies)
     result = {
         "p50_ms": round(latencies[n // 2], 1) if n else 0,
         "p95_ms": round(latencies[int(n * 0.95)], 1) if n else 0,
+        "mean_ms": round(sum(latencies) / n, 1) if n else 0,
         "samples": n, "cache_entries": total_cache,
+        "cache_hits": hits,
+        "cache_hit_rate": round(hits / n, 4) if n else 0,
+        "scope": "retrieval only; excludes LLM generation",
     }
-    print(f"  p50={result['p50_ms']:.0f}ms  p95={result['p95_ms']:.0f}ms")
+    print(f"  p50={result['p50_ms']:.0f}ms  p95={result['p95_ms']:.0f}ms  "
+          f"(retrieval only)  cache hit rate={result['cache_hit_rate']:.2f} "
+          f"({hits}/{n})")
     return result
 
 
@@ -565,7 +685,7 @@ def step7_html_report(metrics, judge_results, importance, latency, eval_set, ret
 #  Console Summary
 # ═══════════════════════════════════════════════════════════════════════
 
-def print_summary(metrics, judge_results, importance, latency, eval_set):
+def print_summary(metrics, judge_results, importance, latency, eval_set, citations=None):
     h, v, b = metrics["hybrid"], metrics["vector"], metrics["bm25"]
     n = max(len(judge_results), 1)
     af = sum(j["faithfulness"] for j in judge_results) / n
@@ -588,6 +708,15 @@ def print_summary(metrics, judge_results, importance, latency, eval_set):
     print(f"Avg Completeness    : {ac:.1f}")
     print(f"PYQ score mean      : {importance['pyq_mean']:.2f}  "
           f"(non-PYQ: {importance['non_pyq_mean']:.2f})  p={importance['p_value']:.4f} {sig}")
+    if citations and citations.get("mean_citation_accuracy") is not None:
+        print(f"Citation accuracy   : {citations['mean_citation_accuracy']:.2f}  "
+              f"({citations['total_citations']} citations, "
+              f"{citations['answers_without_citations']} answers cited nothing)")
+    if latency.get("cache_hit_rate") is not None:
+        print(f"Cache hit rate      : {latency['cache_hit_rate']:.2f}  "
+              f"({latency['cache_hits']}/{latency['samples']} sampled)")
+    print(f"Retrieval latency   : p50 {latency['p50_ms']:.0f}ms  p95 {latency['p95_ms']:.0f}ms"
+          f"  (excludes generation)")
     print(f"Total API calls     : {TOTAL_API_CALLS}")
     print(f"Report saved        : eval/eval_report.html")
     print("=" * 42)
@@ -628,9 +757,10 @@ def main():
         with open(JUDGE_RESULTS_PATH) as f: judge_results = json.load(f)
         metrics = step3_retrieval_metrics(retrieval_results)
         importance = step5_importance_validation()
+        citations = step_citation_metrics(judge_results, retrieval_results)
         latency_data = step6_latency(eval_set)
         step7_html_report(metrics, judge_results, importance, latency_data, eval_set, retrieval_results)
-        print_summary(metrics, judge_results, importance, latency_data, eval_set)
+        print_summary(metrics, judge_results, importance, latency_data, eval_set, citations)
         return
 
     if args.retrieval_only:
@@ -647,9 +777,10 @@ def main():
     metrics = step3_retrieval_metrics(retrieval_results)
     judge_results = step4_answer_and_judge(eval_set, retrieval_results)
     importance = step5_importance_validation()
+    citations = step_citation_metrics(judge_results, retrieval_results)
     latency_data = step6_latency(eval_set)
     step7_html_report(metrics, judge_results, importance, latency_data, eval_set, retrieval_results)
-    print_summary(metrics, judge_results, importance, latency_data, eval_set)
+    print_summary(metrics, judge_results, importance, latency_data, eval_set, citations)
 
 
 if __name__ == "__main__":
