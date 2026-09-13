@@ -17,7 +17,10 @@ SUPPORTED_EXTENSIONS = {".pdf", ".pptx", ".ppt"}
 OCR_LANG = "en"
 
 # ── Ollama settings ──────────────────────────────────────────────────────
-OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+# Native Ollama API (/api/generate), so the /v1 suffix must be stripped if
+# the shared OLLAMA_BASE_URL value carries it.
+_OLLAMA_RAW = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+OLLAMA_BASE_URL = _OLLAMA_RAW[:-3].rstrip("/") if _OLLAMA_RAW.endswith("/v1") else _OLLAMA_RAW
 OLLAMA_MODEL = "llama3:latest"
 
 # ── Parallelism ──────────────────────────────────────────────────────────

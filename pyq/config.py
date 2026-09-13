@@ -12,7 +12,11 @@ PYQ_UPLOAD_DIR = os.path.join(BASE_DIR, "pyq_uploads")
 TRACKER_FILE = os.path.join(BASE_DIR, "pyq", "pyq_processed.json")
 
 # ── Ollama (Llama 3 for question extraction) ─────────────────────────────
-OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1"
+# Configurable so Ollama can live on another host or container. Accepts the
+# base URL with or without the trailing /v1 so one value works for every
+# module regardless of which API shape that module uses.
+_OLLAMA_RAW = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+OLLAMA_BASE_URL = _OLLAMA_RAW if _OLLAMA_RAW.endswith("/v1") else f"{_OLLAMA_RAW}/v1"
 OLLAMA_MODEL = "llama3"
 
 # ── Search parameters ────────────────────────────────────────────────────
