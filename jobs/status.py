@@ -12,6 +12,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 
 from jobs.models import Job, JobPhase, JobStatus, PhaseStatus
+from jobs.recovery import is_job_stale, job_idle_seconds
 from indexing.database import get_db, init_db
 
 log = logging.getLogger(__name__)
@@ -123,6 +124,11 @@ def _serialize_job(job: Job) -> dict:
         "overall_progress_pct": overall_pct,
         "total_duration_sec": total_duration_sec,
         "total_duration": _duration_str(total_duration_sec),
+        # Additive: a job whose worker died stays non-terminal forever, so
+        # total_duration above grows without bound. These let a caller tell
+        # "still running" from "abandoned" without changing existing fields.
+        "is_stale": is_job_stale(job),
+        "idle_sec": round(job_idle_seconds(job) or 0.0, 1),
         "phases": phases_data,
     }
 
@@ -214,6 +220,8 @@ def get_pipeline_overview() -> list[dict]:
                 "total_duration": _duration_str(total_duration_sec),
                 "created_at": _to_ist(job.created_at),
                 "error": job.error_message,
+                "is_stale": is_job_stale(job),
+                "idle_sec": round(job_idle_seconds(job) or 0.0, 1),
             })
 
         return overview
