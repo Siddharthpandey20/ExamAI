@@ -1,5 +1,12 @@
 # Promotion checkpoint — RAG retrieval confidence & query handling
 
+> **SUPERSEDED IN PART — see `PROMOTION-CHECKPOINT-rag-v2.md`.**
+> Steps 0–2 of §4 have since been carried out. Two conclusions below did not
+> survive them: the rewriting proposal (Step 4) is now recommended **against**,
+> and the abstention performance figures were measured before negation items
+> existed. The v2 checkpoint supersedes §1, §4 and §6. Kept unedited as the
+> record of what was believed at the time.
+
 **This is a decision document, not a change.** Nothing in `engine/`, `indexing/`,
 `jobs/`, or `routes/` was modified. No threshold was changed, no feature was
 enabled, no model was swapped. 245/245 tests pass and `examai.db` is byte-identical.
