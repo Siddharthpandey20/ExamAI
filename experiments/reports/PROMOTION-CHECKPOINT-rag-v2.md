@@ -1,5 +1,11 @@
 # Promotion checkpoint v2 — RAG retrieval confidence
 
+> **SUPERSEDED by `PROMOTION-CHECKPOINT-rag-v3.md`.** Its central open
+> question - what real queries look like - has since been answered, and the
+> answer removes abstention from the proposal list: at the fitted threshold
+> it would refuse 52% of genuinely answerable real queries. Kept unedited as
+> the record of what was believed at the time.
+
 Supersedes §1, §4 and §6 of `PROMOTION-CHECKPOINT-rag.md`, which was written
 before Steps 0–2 were carried out. Two of its conclusions did not survive.
 
